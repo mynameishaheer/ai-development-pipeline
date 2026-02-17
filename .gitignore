@@ -40,3 +40,5 @@ projects/*
 *.tmp
 *.bak
 test*.txt
+
+projects/
