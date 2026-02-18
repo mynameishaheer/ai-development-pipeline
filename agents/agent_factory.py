@@ -8,6 +8,8 @@ from agents.base_agent import BaseAgent
 from agents.product_manager_agent import ProductManagerAgent
 from agents.project_manager_agent import ProjectManagerAgent
 from utils.constants import AgentType
+from agents.backend_agent import BackendAgent
+from agents.frontend_agent import FrontendAgent
 
 
 class AgentFactory:
@@ -20,9 +22,9 @@ class AgentFactory:
     _agent_registry: Dict[str, Type[BaseAgent]] = {
         AgentType.PRODUCT_MANAGER: ProductManagerAgent,
         AgentType.PROJECT_MANAGER: ProjectManagerAgent,
+        AgentType.BACKEND: BackendAgent,
+        AgentType.FRONTEND: FrontendAgent,
         # More agents will be added as they're implemented:
-        # AgentType.BACKEND: BackendAgent,
-        # AgentType.FRONTEND: FrontendAgent,
         # AgentType.DATABASE: DatabaseAgent,
         # AgentType.DEVOPS: DevOpsAgent,
         # AgentType.QA: QAAgent,
@@ -129,6 +131,14 @@ def create_project_manager(agent_id: Optional[str] = None) -> ProjectManagerAgen
     """
     return AgentFactory.create_agent(AgentType.PROJECT_MANAGER, agent_id)
 
+
+def create_backend_agent(agent_id: Optional[str] = None) -> BackendAgent:
+    """Create a Backend agent"""
+    return AgentFactory.create_agent(AgentType.BACKEND, agent_id)
+
+def create_frontend_agent(agent_id: Optional[str] = None) -> FrontendAgent:
+    """Create a Frontend agent"""
+    return AgentFactory.create_agent(AgentType.FRONTEND, agent_id)
 
 # Future convenience functions:
 # def create_backend_agent(agent_id: Optional[str] = None) -> BackendAgent:
