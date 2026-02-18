@@ -151,10 +151,11 @@ class BaseAgent(ABC):
         if allowed_tools:
             cmd.extend(["--allowedTools"] + allowed_tools)
         
-        # Add context files
-        if context_files:
-            for file in context_files:
-                cmd.extend(["--context", file])
+        # # Add context files
+        # Note: --context flag not supported in all Claude Code versions
+        # if context_files:
+        #     for file in context_files:
+        #         cmd.extend(["--context", file])
         
         # Set working directory
         cwd = project_path or str(self.workspace_dir)

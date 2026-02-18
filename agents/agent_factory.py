@@ -6,6 +6,7 @@ Factory pattern for creating and managing agents
 from typing import Dict, Optional, Type
 from agents.base_agent import BaseAgent
 from agents.product_manager_agent import ProductManagerAgent
+from agents.project_manager_agent import ProjectManagerAgent
 from utils.constants import AgentType
 
 
@@ -18,8 +19,8 @@ class AgentFactory:
     # Registry of available agent classes
     _agent_registry: Dict[str, Type[BaseAgent]] = {
         AgentType.PRODUCT_MANAGER: ProductManagerAgent,
+        AgentType.PROJECT_MANAGER: ProjectManagerAgent,
         # More agents will be added as they're implemented:
-        # AgentType.PROJECT_MANAGER: ProjectManagerAgent,
         # AgentType.BACKEND: BackendAgent,
         # AgentType.FRONTEND: FrontendAgent,
         # AgentType.DATABASE: DatabaseAgent,
@@ -116,12 +117,25 @@ def create_product_manager(agent_id: Optional[str] = None) -> ProductManagerAgen
     return AgentFactory.create_agent(AgentType.PRODUCT_MANAGER, agent_id)
 
 
+def create_project_manager(agent_id: Optional[str] = None) -> ProjectManagerAgent:
+    """
+    Create a Project Manager agent
+    
+    Args:
+        agent_id: Optional agent ID
+    
+    Returns:
+        ProjectManagerAgent instance
+    """
+    return AgentFactory.create_agent(AgentType.PROJECT_MANAGER, agent_id)
+
+
 # Future convenience functions:
-# def create_project_manager(agent_id: Optional[str] = None) -> ProjectManagerAgent:
-#     return AgentFactory.create_agent(AgentType.PROJECT_MANAGER, agent_id)
-#
 # def create_backend_agent(agent_id: Optional[str] = None) -> BackendAgent:
 #     return AgentFactory.create_agent(AgentType.BACKEND, agent_id)
+#
+# def create_frontend_agent(agent_id: Optional[str] = None) -> FrontendAgent:
+#     return AgentFactory.create_agent(AgentType.FRONTEND, agent_id)
 #
 # ... etc
 
@@ -136,11 +150,16 @@ if __name__ == "__main__":
     print(f"Created: {pm}")
     print(f"Capabilities: {pm.get_capabilities()}")
     
+    # Create a project manager
+    proj_mgr = create_project_manager()
+    print(f"\nCreated: {proj_mgr}")
+    print(f"Capabilities: {proj_mgr.get_capabilities()}")
+    
     # Get all available agents
     available = AgentFactory.get_available_agents()
-    print(f"Available agents: {available}")
+    print(f"\nAvailable agents: {available}")
     
-    # Create all agents (when more are implemented)
-    # all_agents = AgentFactory.create_all_agents()
-    # for agent_type, agent in all_agents.items():
-    #     print(f"{agent_type}: {agent}")
+    # Create all agents
+    all_agents = AgentFactory.create_all_agents()
+    for agent_type, agent in all_agents.items():
+        print(f"{agent_type}: {agent}")
