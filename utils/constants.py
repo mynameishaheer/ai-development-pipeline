@@ -385,7 +385,7 @@ class NotificationType:
 # VERSION INFORMATION
 # ==========================================
 
-PIPELINE_VERSION = "2.0.0"  # Phase 2
+PIPELINE_VERSION = "3.0.0"  # Phase 3
 API_VERSION = "v1"
 
 # ==========================================

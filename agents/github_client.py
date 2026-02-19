@@ -703,9 +703,252 @@ class GitHubClient:
         return created
     
     # ==========================================
+    # ISSUE & PR FETCH OPERATIONS
+    # ==========================================
+
+    async def get_issue(self, repo_name: str, issue_number: int) -> Dict:
+        """
+        Get a specific issue by number
+
+        Args:
+            repo_name: Repository name
+            issue_number: Issue number
+
+        Returns:
+            Issue data dictionary
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/issues/{issue_number}"
+
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def get_pull_request(self, repo_name: str, pr_number: int) -> Dict:
+        """
+        Get a specific pull request by number
+
+        Args:
+            repo_name: Repository name
+            pr_number: PR number
+
+        Returns:
+            PR data dictionary
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}"
+
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def get_pr_files(self, repo_name: str, pr_number: int) -> List[Dict]:
+        """
+        Get files changed in a pull request
+
+        Args:
+            repo_name: Repository name
+            pr_number: PR number
+
+        Returns:
+            List of changed file data
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}/files"
+
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def create_pr_review(
+        self,
+        repo_name: str,
+        pr_number: int,
+        event: str,
+        body: str,
+        comments: Optional[List[Dict]] = None
+    ) -> Dict:
+        """
+        Create a review on a pull request
+
+        Args:
+            repo_name: Repository name
+            pr_number: PR number
+            event: Review event - "APPROVE", "REQUEST_CHANGES", or "COMMENT"
+            body: Review comment body
+            comments: Optional list of inline comments
+
+        Returns:
+            Review data
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews"
+
+        data: Dict[str, Any] = {
+            "event": event,
+            "body": body,
+        }
+
+        if comments:
+            data["comments"] = comments
+
+        response = requests.post(url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def add_issue_comment(
+        self,
+        repo_name: str,
+        issue_number: int,
+        body: str
+    ) -> Dict:
+        """
+        Add a comment to an issue or pull request
+
+        Args:
+            repo_name: Repository name
+            issue_number: Issue/PR number
+            body: Comment body
+
+        Returns:
+            Comment data
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/issues/{issue_number}/comments"
+
+        data = {"body": body}
+
+        response = requests.post(url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def get_workflow_runs(
+        self,
+        repo_name: str,
+        workflow_id: Optional[str] = None,
+        branch: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get workflow run history
+
+        Args:
+            repo_name: Repository name
+            workflow_id: Optional workflow file name or ID
+            branch: Optional branch filter
+
+        Returns:
+            List of workflow runs
+        """
+        owner = self.org or self.username
+
+        if workflow_id:
+            url = f"{self.base_url}/repos/{owner}/{repo_name}/actions/workflows/{workflow_id}/runs"
+        else:
+            url = f"{self.base_url}/repos/{owner}/{repo_name}/actions/runs"
+
+        params = {}
+        if branch:
+            params["branch"] = branch
+
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+
+        return response.json().get("workflow_runs", [])
+
+    async def assign_issue(
+        self,
+        repo_name: str,
+        issue_number: int,
+        assignees: List[str]
+    ) -> Dict:
+        """
+        Assign an issue to users
+
+        Args:
+            repo_name: Repository name
+            issue_number: Issue number
+            assignees: List of usernames to assign
+
+        Returns:
+            Updated issue data
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/issues/{issue_number}/assignees"
+
+        data = {"assignees": assignees}
+
+        response = requests.post(url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def create_milestone(
+        self,
+        repo_name: str,
+        title: str,
+        description: str = "",
+        due_on: Optional[str] = None
+    ) -> Dict:
+        """
+        Create a milestone in a repository
+
+        Args:
+            repo_name: Repository name
+            title: Milestone title
+            description: Milestone description
+            due_on: Due date in ISO 8601 format
+
+        Returns:
+            Milestone data
+        """
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/milestones"
+
+        data: Dict[str, Any] = {
+            "title": title,
+            "description": description,
+        }
+
+        if due_on:
+            data["due_on"] = due_on
+
+        response = requests.post(url, headers=self.headers, json=data)
+        response.raise_for_status()
+
+        return response.json()
+
+    async def update_issue_milestone(
+        self,
+        repo_name: str,
+        issue_number: int,
+        milestone_number: int
+    ) -> Dict:
+        """
+        Set milestone on an issue
+
+        Args:
+            repo_name: Repository name
+            issue_number: Issue number
+            milestone_number: Milestone number
+
+        Returns:
+            Updated issue data
+        """
+        return await self.update_issue(
+            repo_name=repo_name,
+            issue_number=issue_number,
+            milestone=milestone_number
+        )
+
+    # ==========================================
     # UTILITY METHODS
     # ==========================================
-    
+
     async def check_rate_limit(self) -> Dict:
         """
         Check GitHub API rate limit status

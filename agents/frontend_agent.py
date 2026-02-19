@@ -142,11 +142,24 @@ class FrontendAgent(BaseAgent):
     
     async def _get_issue_details(self, repo_name: str, issue_number: int) -> Dict:
         """Get issue details from GitHub"""
-        return {
-            "number": issue_number,
-            "title": f"UI Issue #{issue_number}",
-            "body": "UI implementation details"
-        }
+        try:
+            issue = await self.github.get_issue(repo_name, issue_number)
+            return {
+                "number": issue.get("number", issue_number),
+                "title": issue.get("title", f"UI Issue #{issue_number}"),
+                "body": issue.get("body", ""),
+                "labels": [lbl.get("name", "") for lbl in issue.get("labels", [])],
+                "state": issue.get("state", "open"),
+            }
+        except Exception as e:
+            self.logger.warning(f"Could not fetch issue #{issue_number}: {e}")
+            return {
+                "number": issue_number,
+                "title": f"UI Issue #{issue_number}",
+                "body": "UI implementation details",
+                "labels": [],
+                "state": "open",
+            }
     
     @retry_on_rate_limit()
     async def _create_feature_branch(self, repo_name: str, branch_name: str):
