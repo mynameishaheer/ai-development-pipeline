@@ -130,6 +130,46 @@ async def deploy_project(ctx):
         await ctx.send(response)
 
 
+@bot.command(name='run', aliases=['pipeline'])
+async def run_pipeline(ctx, *, action: str = "pipeline"):
+    """
+    Run the full automated pipeline
+    Usage: !run pipeline
+    """
+    async with ctx.typing():
+        response = await master.handle_run_full_pipeline(action, str(ctx.author.id))
+        if len(response) > 2000:
+            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
+            for chunk in chunks:
+                await ctx.send(chunk)
+        else:
+            await ctx.send(response)
+
+
+@bot.command(name='workers')
+async def workers_command(ctx, action: str = "status"):
+    """
+    Manage worker agents
+    Usage: !workers [start|stop|status]
+    Example: !workers start
+    """
+    async with ctx.typing():
+        action = action.lower()
+        if action == "start":
+            response = await master.start_workers()
+        elif action == "stop":
+            response = await master.stop_workers()
+        else:
+            response = await master.worker_status()
+
+        if len(response) > 2000:
+            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
+            for chunk in chunks:
+                await ctx.send(chunk)
+        else:
+            await ctx.send(response)
+
+
 @bot.command(name='help')
 async def help_command(ctx):
     """Show help message"""
@@ -163,7 +203,17 @@ async def help_command(ctx):
         value="`!deploy` - Prepare project for deployment",
         inline=False
     )
-    
+
+    embed.add_field(
+        name="⚙️ Worker Agents",
+        value=(
+            "`!workers start` - Start background worker agents\n"
+            "`!workers stop` - Stop worker agents\n"
+            "`!workers status` - Check queue sizes and worker states"
+        ),
+        inline=False
+    )
+
     embed.add_field(
         name="💬 Chat with Me",
         value="DM me or mention me to have a conversation!",

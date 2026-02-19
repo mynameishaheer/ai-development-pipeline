@@ -23,6 +23,7 @@ from agents.database_agent import DatabaseAgent
 from agents.devops_agent import DevOpsAgent
 from agents.qa_agent import QAAgent
 from agents.assignment_manager import AssignmentManager
+from agents.worker_daemon import AgentWorkerDaemon
 
 
 class MasterAgent:
@@ -75,6 +76,10 @@ class MasterAgent:
 
         # Pipeline state tracking
         self._pipeline_steps: List[Dict] = []
+
+        # Worker daemon (started on demand)
+        self._worker_daemon: Optional[AgentWorkerDaemon] = None
+        self._worker_task: Optional[asyncio.Task] = None
 
         print("🧠 Master Agent initialized (Phase 3)")
 
@@ -158,6 +163,7 @@ class MasterAgent:
             "run_pipeline": self.handle_run_full_pipeline,
             "assign_issues": self.handle_assign_issues,
             "run_tests": self.handle_run_tests,
+            "workers": self.handle_workers,
             "general_query": self.handle_general_query,
         }
 
@@ -191,6 +197,7 @@ Possible intents:
 - run_pipeline: User wants to run the full automated pipeline
 - assign_issues: User wants to assign GitHub issues to agents
 - run_tests: User wants to run tests or QA checks
+- workers: User wants to start, stop, or check status of worker agents
 - general_query: General question or conversation
 
 User message: "{message}"
@@ -683,6 +690,76 @@ Provide a concise 3-5 line summary.
 """
         except Exception as e:
             return f"❌ Deployment setup failed: {str(e)}"
+
+    async def handle_workers(self, message: str, user_id: str) -> str:
+        """Route !workers start / stop / status commands."""
+        msg_lower = message.lower()
+        if "start" in msg_lower:
+            return await self.start_workers()
+        elif "stop" in msg_lower:
+            return await self.stop_workers()
+        else:
+            return await self.worker_status()
+
+    async def start_workers(self, agents: Optional[List[str]] = None) -> str:
+        """Create and start the AgentWorkerDaemon as a background asyncio task."""
+        if self._worker_daemon and self._worker_daemon._running:
+            return "⚠️ Workers are already running. Use `!workers status` to check."
+
+        self._worker_daemon = AgentWorkerDaemon(agent_types=agents)
+        agent_types = self._worker_daemon.agent_types
+
+        # Run as a background task so we don't block the event loop
+        self._worker_task = asyncio.create_task(self._worker_daemon.start())
+
+        print(f"🚀 Worker daemon started for: {', '.join(agent_types)}")
+
+        return (
+            f"✅ Workers started for: {', '.join(agent_types)}\n\n"
+            f"Workers are now pulling tasks from Redis queues and implementing issues.\n"
+            f"Use `!workers status` to monitor progress."
+        )
+
+    async def stop_workers(self) -> str:
+        """Gracefully stop the AgentWorkerDaemon."""
+        if not self._worker_daemon or not self._worker_daemon._running:
+            return "⚠️ No workers are currently running."
+
+        await self._worker_daemon.stop()
+
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+
+        self._worker_daemon = None
+        self._worker_task = None
+
+        return "✅ Workers stopped successfully."
+
+    async def worker_status(self) -> str:
+        """Return queue sizes and worker states."""
+        if not self._worker_daemon:
+            return "📊 Workers are not running. Use `!workers start` to start them."
+
+        status = self._worker_daemon.get_status()
+        queue_lines = [
+            f"  • **{agent}**: {count} pending tasks"
+            for agent, count in status.get("queues", {}).items()
+        ]
+        state_lines = [
+            f"  • **{agent}**: {state}"
+            for agent, state in status.get("worker_states", {}).items()
+        ]
+
+        return (
+            f"📊 **Worker Status**\n\n"
+            f"**Running**: {'Yes' if status['running'] else 'No'}\n\n"
+            f"**Queue Sizes:**\n" + "\n".join(queue_lines) + "\n\n"
+            f"**Worker States:**\n" + "\n".join(state_lines)
+        )
 
     async def handle_general_query(self, message: str, user_id: str) -> str:
         """Handle general questions and conversations."""

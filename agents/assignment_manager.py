@@ -460,6 +460,49 @@ class AssignmentManager:
 
         return status
 
+    async def assign_pr_review(
+        self,
+        repo_name: str,
+        pr_number: int,
+        issue_number: int,
+        project_path: str = ""
+    ) -> bool:
+        """
+        Enqueue a QA pull-request review task.
+
+        Called by the worker daemon after a backend/frontend agent creates a PR.
+        Pushes a task to queue:agent:qa so the QA worker can pick it up.
+
+        Args:
+            repo_name: GitHub repository name
+            pr_number: Pull request number to review
+            issue_number: Related issue number
+            project_path: Local project path (passed to QA agent for test runs)
+
+        Returns:
+            True if enqueued successfully
+        """
+        task = {
+            "task_type": "review_pr",
+            "repo_name": repo_name,
+            "pr_number": pr_number,
+            "issue_number": issue_number,
+            "project_path": project_path,
+            "assigned_at": datetime.now().isoformat(),
+            "assigned_agent": AgentType.QA,
+        }
+
+        queue_key = f"queue:agent:{AgentType.QA}"
+        task_json = json.dumps(task)
+        # Use pr_number as priority so lower PR numbers are reviewed first
+        self.redis.zadd(queue_key, {task_json: float(pr_number)})
+
+        self.logger.info(
+            f"Enqueued QA review task: PR #{pr_number} "
+            f"(issue #{issue_number}) in {repo_name}"
+        )
+        return True
+
     def clear_all_queues(self):
         """Clear all agent task queues (use with caution)"""
         agent_types = [

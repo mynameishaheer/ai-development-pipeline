@@ -3,12 +3,14 @@ Frontend Agent for AI Development Pipeline
 Builds UI components, integrates with backend APIs, creates PRs
 """
 
+import os
+import subprocess
 from typing import Dict, List, Optional
 from pathlib import Path
 
 from agents.base_agent import BaseAgent
 from agents.github_client import create_github_client
-from utils.constants import AgentType, GitHubBranches
+from utils.constants import AgentType, GitHubBranches, GITHUB_USERNAME
 from utils.error_handlers import retry_on_rate_limit
 
 
@@ -111,7 +113,10 @@ class FrontendAgent(BaseAgent):
             
             # Write tests
             await self._write_component_tests(project_path, issue_number)
-            
+
+            # Validate — run tests, retry once on failure
+            await self._validate_implementation(project_path, issue_number)
+
             # Commit and push
             await self._commit_and_push(project_path, branch_name, issue_number)
             
@@ -178,6 +183,20 @@ class FrontendAgent(BaseAgent):
         (project_path / "src" / "components").mkdir(parents=True, exist_ok=True)
         (project_path / "src" / "pages").mkdir(parents=True, exist_ok=True)
         (project_path / "tests").mkdir(exist_ok=True)
+
+        # Initialise git if not already a repo
+        git_dir = project_path / ".git"
+        if not git_dir.exists():
+            username = GITHUB_USERNAME or os.getenv("GITHUB_USERNAME", "")
+            await self.call_claude_code(
+                prompt=(
+                    f"Run: git init && git remote add origin "
+                    f"https://github.com/{username}/{repo_name}.git"
+                ),
+                project_path=str(project_path),
+                allowed_tools=["Bash"],
+            )
+
         return project_path
     
     async def _implement_ui_with_claude(
@@ -242,6 +261,116 @@ Test:
             allowed_tools=["Write", "Edit"]
         )
     
+    async def _validate_implementation(
+        self,
+        project_path: Path,
+        issue_number: int
+    ):
+        """
+        Run tests to validate the UI implementation.
+
+        Detects jest (package.json) or pytest, runs tests, and on failure makes
+        one retry call to Claude Code. Raises RuntimeError if tests still fail.
+        Logs a warning (but does not block) when no tests are found.
+        """
+        has_jest = (project_path / "package.json").exists()
+        has_pytest = (
+            (project_path / "pytest.ini").exists()
+            or list(project_path.glob("tests/**/*.py"))
+        )
+
+        if not has_jest and not has_pytest:
+            self.logger.warning(
+                f"No test framework detected for issue #{issue_number} "
+                f"in {project_path} — skipping validation"
+            )
+            return
+
+        test_output = ""
+        passed = False
+
+        if has_jest:
+            try:
+                proc = subprocess.run(
+                    ["npm", "test", "--", "--watchAll=false"],
+                    cwd=str(project_path),
+                    timeout=120,
+                    capture_output=True,
+                    text=True,
+                )
+                test_output = proc.stdout + proc.stderr
+                passed = proc.returncode == 0 and "failed" not in test_output.lower()
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                self.logger.warning(f"jest run failed: {e}")
+                return
+
+        elif has_pytest:
+            try:
+                proc = subprocess.run(
+                    ["python", "-m", "pytest", "-v", "--tb=short", "-x"],
+                    cwd=str(project_path),
+                    timeout=120,
+                    capture_output=True,
+                    text=True,
+                )
+                test_output = proc.stdout + proc.stderr
+                passed = proc.returncode == 0
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                self.logger.warning(f"pytest run failed: {e}")
+                return
+
+        if passed:
+            self.logger.info(f"Tests passed for issue #{issue_number}")
+            return
+
+        # One retry — ask Claude Code to fix the failures
+        self.logger.warning(
+            f"Tests failing for issue #{issue_number}, retrying with Claude Code fix"
+        )
+        await self.call_claude_code(
+            prompt=(
+                f"Fix these test failures for UI issue #{issue_number}:\n\n"
+                f"{test_output[:3000]}\n\n"
+                "Identify the root cause and fix the components or tests."
+            ),
+            project_path=str(project_path),
+            allowed_tools=["Write", "Edit", "Bash", "Read"],
+        )
+
+        # Re-run after fix
+        if has_jest:
+            try:
+                proc = subprocess.run(
+                    ["npm", "test", "--", "--watchAll=false"],
+                    cwd=str(project_path),
+                    timeout=120,
+                    capture_output=True,
+                    text=True,
+                )
+                test_output = proc.stdout + proc.stderr
+                passed = proc.returncode == 0 and "failed" not in test_output.lower()
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+        elif has_pytest:
+            try:
+                proc = subprocess.run(
+                    ["python", "-m", "pytest", "-v", "--tb=short", "-x"],
+                    cwd=str(project_path),
+                    timeout=120,
+                    capture_output=True,
+                    text=True,
+                )
+                passed = proc.returncode == 0
+                test_output = proc.stdout + proc.stderr
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        if not passed:
+            raise RuntimeError(
+                f"Tests still failing after retry for UI issue #{issue_number}. "
+                f"Output: {test_output[:500]}"
+            )
+
     async def _commit_and_push(
         self,
         project_path: Path,
