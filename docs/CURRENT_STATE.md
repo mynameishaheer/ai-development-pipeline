@@ -1,250 +1,163 @@
-# AI Development Pipeline - Current State
+# AI Development Pipeline — Current State
 
-**Last Updated**: February 18, 2026
-**Phase**: Phase 2 COMPLETE ✅ | Phase 3 READY TO START
-**Development Mode**: Transitioning to Claude Code Autonomous Development
-
----
-
-## ✅ Phase 2 - COMPLETE
-
-### All Checkpoints Verified:
-- ✅ **Checkpoint 1**: Foundation Layer (error handling, logging, messaging, GitHub client)
-- ✅ **Checkpoint 2**: Base Agent + Product Manager
-- ✅ **Checkpoint 3**: Project Manager + GitHub Integration (100% tested)
-- ✅ **Checkpoint 4**: Backend + Frontend Agents + Master Integration
-
-### Test Results:
-**Checkpoint 3 End-to-End Test**: 100% SUCCESS ✅
-```
-📊 Results:
-- Repository Created: ✅ (1.4 seconds)
-- Dev Branch Created: ✅
-- Branch Protection Set: ✅  
-- Labels Created: ✅ (9 standard labels)
-- Issues Created: ✅ (29 issues in 30 seconds)
-- Initial Files Created: ✅
-Total Time: 1 minute 28 seconds
-```
-
-**Repository Created**: https://github.com/mynameishaheer/gated-community-system
-- 29 issues with full descriptions
-- Dev branch with protection
-- README, labels, structure complete
+**Last Updated**: February 19, 2026
+**Active Phase**: Phases 1–7 COMPLETE ✅ | Phase 8 planning in progress
+**Test Suite**: 266/266 passing ✅
 
 ---
 
-## 📦 What's Operational
+## What This System Does
 
-### Fully Functional (Production Ready):
-1. **Product Manager Agent**: Creates comprehensive PRDs (40-50KB) ✅
-2. **Project Manager Agent**: GitHub automation (repos, issues, branches) ✅
-3. **Master Agent**: Orchestrates PM and Project Manager ✅
-4. **Discord Bot**: Can trigger workflow via `!new` command ✅
-5. **Error Handling**: Automatic retry with exponential backoff ✅
-6. **Structured Logging**: JSON logs for debugging ✅
-7. **Agent Messaging**: Redis pub/sub communication ✅
+You describe an idea in Discord (or the web dashboard). The pipeline autonomously:
 
-### Framework Ready (Needs Testing):
-8. **Backend Agent**: Code implementation framework exists
-9. **Frontend Agent**: UI development framework exists
+1. Writes a full PRD
+2. Creates a GitHub repository with issues, labels, branch protection
+3. Designs a database schema
+4. Sets up CI/CD and Docker
+5. Assigns issues to specialized agents (backend, frontend, QA, etc.)
+6. Worker agents implement each issue, write tests, validate, and open PRs
+7. QA agent reviews PRs, merges approved ones, closes issues
+8. Monitors CI — auto-fixes failing runs via Claude Code
+9. When all tasks complete, Docker-builds the app and deploys it
+10. Exposes the app at `https://projectname.devbot.site` via Cloudflare Tunnel
+
+Zero human intervention after the initial `!new` command.
 
 ---
 
-## 📁 Project Structure
+## Completed Phases
+
+| Phase | What Was Built | Tests |
+|-------|---------------|-------|
+| 1 | Foundation: error handling, logging, Redis pub/sub, base agent | — |
+| 2 | All core agents: PM, Project Manager, Backend, Frontend, Database, DevOps, QA | 100% |
+| 3 | Worker daemon, Redis task queues, QA auto-review, full E2E pipeline | 109/109 |
+| 4 | CI/CD monitor, auto-fix failing runs, worker stall detection, Discord notifications | 154/154 |
+| 5 | Multi-project management (`_projects` dict, `!projects`, `!switch`) | 266/266 |
+| 6 | All agent stubs implemented: `fix_bug`, `write_tests`, `refactor_code`, `improve_ui` | 266/266 |
+| 7 | Docker + Cloudflare Tunnel deployment, FastAPI web dashboard on :8080 | 266/266 |
+
+---
+
+## Current File Structure
 
 ```
 ai-dev-pipeline/
 ├── agents/
-│   ├── base_agent.py              ✅ Tested
-│   ├── product_manager_agent.py   ✅ Tested
-│   ├── project_manager_agent.py   ✅ Tested (100%)
-│   ├── backend_agent.py           📝 Framework only
-│   ├── frontend_agent.py          📝 Framework only
-│   ├── github_client.py           ✅ Working
-│   ├── messaging.py               ✅ Working
-│   ├── agent_factory.py           ✅ Updated
-│   └── master_agent.py            ✅ Updated
-├── utils/
-│   ├── error_handlers.py          ✅ Working
-│   ├── constants.py               ✅ Working
-│   └── structured_logger.py       ✅ Working
+│   ├── base_agent.py              ✅ Abstract base, call_claude_code()
+│   ├── master_agent.py            ✅ Orchestrator, multi-project, deploy
+│   ├── product_manager_agent.py   ✅ PRD generation
+│   ├── project_manager_agent.py   ✅ GitHub repo/issues/branches
+│   ├── backend_agent.py           ✅ implement_feature, fix_bug, write_tests, refactor
+│   ├── frontend_agent.py          ✅ implement_feature, fix_bug, improve_ui
+│   ├── database_agent.py          ✅ Schema design, migrations
+│   ├── devops_agent.py            ✅ CI/CD, Dockerfile
+│   ├── qa_agent.py                ✅ PR review, test running, coverage
+│   ├── assignment_manager.py      ✅ Redis queues, issue routing
+│   ├── worker_daemon.py           ✅ Worker loops, all-done detection, auto-deploy
+│   ├── github_client.py           ✅ Full GitHub API wrapper
+│   ├── github_pusher.py           ✅ Clone → rsync → commit → push
+│   ├── pipeline_monitor.py        ✅ CI polling, auto-fix, stall detection
+│   ├── deployer.py                ✅ Docker build → port alloc → CF Tunnel
+│   └── agent_factory.py           ✅ Agent creation by type
 ├── api/
-│   ├── discord_bot.py             ✅ Ready
-│   └── web_server.py              📝 Basic
+│   ├── discord_bot.py             ✅ All commands wired
+│   ├── dashboard.py               ✅ FastAPI on :8080
+│   └── templates/                 ✅ Jinja2 + Tailwind + HTMX
+├── utils/
+│   ├── constants.py               ✅
+│   ├── error_handlers.py          ✅ Retry, backoff
+│   └── structured_logger.py       ✅ JSON logs
 ├── scripts/
-│   └── health_check.sh            ✅ Working
-├── docs/
-│   ├── CURRENT_STATE.md           ✅ This file
-│   └── (implementation plan, handoff guide, etc.) ✅
-├── tests/
-│   └── test_checkpoint3.py        ✅ 100% passing
-├── projects/
-│   └── gated-community-system/    ✅ Example project
-└── .env                           ✅ Configured
+│   ├── run_workers.py             ✅ Standalone worker launcher
+│   ├── run_dashboard.py           ✅ uvicorn :8080
+│   └── health_check.sh            ✅
+├── tests/                         ✅ 266 tests, all passing
+├── docs/                          ✅ This folder
+└── .env                           ✅ Secrets
 ```
 
 ---
 
-## 🎯 Current Capabilities
+## Discord Commands
 
-### What You Can Do Right Now:
-
-**1. Create Projects via Discord**:
-```
-!new Build a task management system with authentication and team features
-```
-Result in 5-8 minutes:
-- ✅ 50KB comprehensive PRD
-- ✅ GitHub repository
-- ✅ 20-30 issues ready for development
-- ✅ Dev branch with protection
-- ✅ All setup complete
-
-**2. Create Projects Programmatically**:
-```python
-from agents.master_agent import MasterAgent
-
-master = MasterAgent()
-result = await master.handle_new_project(
-    "Build a blog with auth and comments",
-    "user_123"
-)
-```
-
-**3. Run Health Checks**:
-```bash
-./scripts/health_check.sh
-```
-
-**4. Test Complete Workflow**:
-```bash
-python test_checkpoint3.py
-```
+| Command | What It Does |
+|---------|-------------|
+| `!new <description>` | Start a new project end-to-end |
+| `!run pipeline` | Run full pipeline on active project |
+| `!status` | Active project status + queue sizes |
+| `!projects` | List all projects with deploy URLs |
+| `!switch <name>` | Switch active project |
+| `!deploy` | Deploy active project (Docker + Cloudflare) |
+| `!deploy redeploy` | Rebuild and redeploy |
+| `!workers start` | Start background worker agents |
+| `!workers stop` | Stop workers |
+| `!workers status` | Queue sizes + worker states |
+| `!monitor start/stop/status` | CI/CD monitor control |
+| `!task <description>` | Ad-hoc code task |
+| `!help` | Show all commands |
 
 ---
 
-## 📊 Metrics
+## Required `.env` Variables
 
-### Code Statistics:
-- **Total Lines**: ~8,500
-- **Files**: 20+ Python files
-- **Agents**: 5 (Master, PM, Proj Mgr, Backend, Frontend)
-- **Tests**: 3 comprehensive test files
-- **Documentation**: 10+ markdown files
-
-### Performance:
-- **PRD Generation**: 20-270 seconds
-- **GitHub Setup**: 30-60 seconds  
-- **Issue Creation**: 30 seconds (for 29 issues)
-- **Complete Workflow**: 5-8 minutes
-
-### Reliability:
-- **Success Rate**: 100% (Checkpoint 3 test)
-- **Error Recovery**: 3 retries with backoff
-- **GitHub API**: Rate limit handling active
-
----
-
-## 🔧 Configuration
-
-### Environment Variables (`.env`):
 ```env
-DISCORD_BOT_TOKEN=set ✅
-GITHUB_TOKEN=set ✅
-GITHUB_USERNAME=mynameishaheer ✅
-REDIS_HOST=localhost ✅
-REDIS_PORT=6379 ✅
+# GitHub
+GITHUB_TOKEN=ghp_...
+GITHUB_USERNAME=your-username
+
+# Discord
+DISCORD_BOT_TOKEN=...
+
+# Cloudflare
+CLOUDFLARE_TUNNEL_NAME=devbot-pipeline
+CLOUDFLARE_TUNNEL_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+DEPLOY_DOMAIN=devbot.site
+
+# Redis (defaults fine for local)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Optional
+MIN_TEST_COVERAGE=80
+WORKER_POLL_INTERVAL=10
 ```
 
-### Services Running:
-- ✅ Redis Server (port 6379)
-- ✅ Claude Code CLI (v2.1.37)
-- ✅ Node.js 20.20.0
-- ✅ Python 3.10.12 + venv
-
 ---
 
-## 🚧 Known Limitations (To Be Addressed in Phase 3)
+## How to Run the System
 
-1. **No Auto-Assignment**: Issues created but not automatically assigned to dev agents
-2. **No Code Implementation**: Backend/Frontend agents exist but don't auto-implement yet
-3. **No QA Agent**: No automated testing/approval before merge
-4. **No Database Agent**: Schema design not automated
-5. **No DevOps Agent**: Deployment not automated
-6. **Single Project**: Only one project at a time
+See `docs/RUNNING_THE_SYSTEM.md` for the complete startup guide.
 
----
-
-## 🎯 Phase 3 - READY TO START
-
-### Development Method: **Claude Code Autonomous Development**
-
-Starting Phase 3, we will use Claude Code CLI to develop the pipeline itself. This means:
-- ✅ Claude Code reads requirements
-- ✅ Claude Code writes all the code
-- ✅ Claude Code tests the code
-- ✅ Claude Code commits when ready
-- ✅ Human only reviews milestones
-
-### Phase 3 Objectives:
-1. **QA Agent**: Automated testing and PR approval
-2. **Auto-Assignment**: Issues automatically assigned to appropriate agents
-3. **Database Agent**: Schema design and migrations
-4. **DevOps Agent**: Automated deployment
-5. **Complete E2E**: User request → Live deployed app (zero human intervention)
-
-### Getting Started with Phase 3:
-
-**Read First**:
-- `docs/Phase 2/PHASE_2_COMPLETE.md` - What's been built
-- `docs/Phase 3/PHASE_3_DEVELOPMENT_GUIDE.md` - Development plan
-
-**Then Run**:
+**TL;DR:**
 ```bash
-cd ~/ai-dev-pipeline
-source venv/bin/activate
-claude -p "$(cat docs/Phase 3/PHASE_3_DEVELOPMENT_GUIDE.md)"
+# Terminal 1 — Discord bot
+cd ~/ai-dev-pipeline && venv/bin/python api/discord_bot.py
+
+# Terminal 2 — Web dashboard
+cd ~/ai-dev-pipeline && venv/bin/python scripts/run_dashboard.py
+
+# Workers are started from Discord with: !workers start
 ```
 
 ---
 
-## 📝 For Next Session/Developer
+## Known Issues / Immediate Gaps
 
-### Quick Start:
-```bash
-ssh shaheer@vm.devbot.site
-cd ~/ai-dev-pipeline
-source venv/bin/activate
-./scripts/health_check.sh          # Verify system
-python test_checkpoint3.py        # Verify Phase 2 still works
-cat docs/Phase 3/PHASE_3_DEVELOPMENT_GUIDE.md  # Read development plan
-```
+1. **Project names contain underscores** — Cloudflare DNS requires dashes. `deployer.py` should sanitize `project_20260219` → `project-20260219` before using as subdomain. Tracked in Phase 8 (8.2).
 
-### What to Work On:
-See `docs/Phase 3/PHASE_3_DEVELOPMENT_GUIDE.md` for detailed plan.
+2. **No Dockerfile guarantee** — The DevOps agent generates a Dockerfile via Claude Code, but if it's malformed, `docker build` fails silently. Tracked in Phase 8 (8.3).
 
-**Priority Order**:
-1. QA Agent (Week 1)
-2. Auto-Assignment System (Week 1-2)
-3. Database Agent (Week 2)
-4. DevOps Agent (Week 3)
-5. Complete Integration (Week 4)
+3. **Dashboard is read-only** — Current Phase 7 dashboard shows status and has a deploy button but can't create projects, manage issues, or view logs. Tracked in Phase 9.
 
 ---
 
-## 🎉 Major Achievements
+## Metrics
 
-✅ **Complete autonomous project creation** (idea → GitHub repo in 5 mins)
-✅ **Professional PRD generation** (40-50KB comprehensive docs)
-✅ **Full GitHub automation** (repos, branches, issues, labels)
-✅ **Agent communication system** (Redis pub/sub)
-✅ **Production-ready infrastructure** (error handling, logging)
-✅ **100% test success rate** (Checkpoint 3)
-✅ **8,500 lines of production code**
-
----
-
-**Current Status**: ✅ Phase 2 COMPLETE | Ready for Phase 3 (Claude Code Autonomous Development)
-**Next Milestone**: QA Agent + Auto-Assignment (Phase 3.1-3.2)
-**Estimated Completion**: 4 weeks for complete Phase 3
+- **Total Python files**: ~25
+- **Total lines of code**: ~15,000+
+- **Test files**: 13
+- **Test count**: 266
+- **Agents**: 9 specialized + 1 master
+- **Discord commands**: 11
+- **Dashboard routes**: 5

@@ -172,13 +172,18 @@ class BaseAgent(ABC):
         )
         
         try:
-            # Execute Claude Code
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd,
-                timeout=timeout
+            # Execute Claude Code in a thread pool so the asyncio event loop
+            # stays free (Discord heartbeats, other coroutines, etc.)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=cwd,
+                    timeout=timeout
+                )
             )
             
             duration = time.time() - start_time

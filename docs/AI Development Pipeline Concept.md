@@ -1,152 +1,174 @@
-# AI Development Pipeline Concept
+# AI Development Pipeline — System Concept
 
-I am building an AI development pipeline using the Claude Code CLI. The goal is to create a
-system that I can interact with by simply describing an idea or a project. This system acts as
-a central AI “brain” that manages a group of specialized agents working together to take a
-project from concept to deployment.
-These agents represent the roles found in a real software team, such as product
-management, engineering, design, QA, and infrastructure.
-Each agent has a clearly defined responsibility. The central AI brain coordinates all agents,
-assigns tasks, and manages the overall workflow. It provides updates, asks for input when
-necessary, and makes decisions independently whenever possible.
-If the system encounters an issue, it should attempt to resolve it automatically or delegate it
-to the appropriate sub-agent. It should manage its own memory and context efficiently to
-reduce token usage, and it should be capable of developing new skills or routines when
-required.
+**Last Updated**: February 19, 2026
 
-## Core Agent Roles
+---
 
-## Master Agent
+## What This Is
 
-The master agent communicates directly with the user. It handles ideation, gathers
-requirements, provides updates, and controls all other agents. Its primary responsibility is to
-ensure the project moves smoothly from concept to completion.
-It also:
-● Manages system memory and context
-● Resolves high-level conflicts between agents
-● Decides when to escalate issues to the user
-● Oversees long-term learning and skill development
+An autonomous AI development team running on a single VM. You describe a project idea in Discord (or the web dashboard), and the pipeline takes it from concept to a running, publicly accessible web app — with zero human intervention after the initial `!new` command.
 
-## Product Manager Agent
+The system is built on Claude Code CLI (subprocess calls) which means all code generation runs against your Claude Pro subscription with no additional API costs.
 
-This agent converts user requirements into structured documentation.
+---
 
+## Core Idea
+
+Real software teams have specialized roles that work in parallel: product managers write requirements, engineers implement features, QA validates the work, DevOps deploys it, and a manager coordinates everyone. This pipeline recreates that structure with AI agents.
+
+Each agent has a single job. The MasterAgent coordinates them. Redis queues decouple task assignment from execution. GitHub is the shared workspace (issues, branches, PRs, CI).
+
+---
+
+## Agent Roles
+
+### MasterAgent (`agents/master_agent.py`)
+The single orchestrator. Every Discord command and dashboard action goes through it.
 
 Responsibilities:
-● Create the Product Requirements Document (PRD)
-● Define features, scope, and priorities
-● Produce design and implementation guidelines
-● Clarify ambiguous requirements
-● Maintain product documentation as the project evolves
+- Manages `_projects` dict — knows about all projects, which is active
+- Routes user requests to the right sub-agent
+- Holds one `PipelineMonitor` per project (watches CI)
+- Controls the `AgentWorkerDaemon` (start/stop workers)
+- Sends proactive Discord notifications when things happen autonomously
+- Exposes a `get_full_status()` snapshot for the web dashboard
 
-## Project Manager Agent
+### Product Manager Agent (`agents/product_manager_agent.py`)
+Converts a plain-English description into a structured PRD.
 
-This agent plans and executes the development lifecycle.
-Responsibilities:
-● Convert product documents into execution plans
-● Create sprints, issues, and task breakdowns
-● Assign work to developer agents
-● Track progress and completion
-● Integrate QA feedback into the current or next cycle
-● Adjust plans when requirements change
-Repository and deployment control:
-● Create and manage issues
-● Track and manage branches
-● Merge pull requests
-● Remove stale branches
-● Configure CI/CD pipelines
-● Deploy builds to live preview environments
+Output: a `docs/PRD.md` file (40–50KB) with features, acceptance criteria, technical constraints, and issue breakdown.
 
+### Project Manager Agent (`agents/project_manager_agent.py`)
+Turns the PRD into a GitHub repository with everything set up for development.
 
-## Backend Agent
+Output: GitHub repo with dev branch, labels (backend/frontend/database/devops/qa/bug/enhancement), branch protection, and 15–30 issues.
 
-Implements server-side logic and APIs.
-Responsibilities:
-● Interpret business logic from tickets and PRDs
-● Implement backend services and APIs
-● Handle validation, errors, and edge cases
-● Write tests for all features
-● Manage branches and pull requests
-● Provide API documentation for frontend integration
+### Backend Agent (`agents/backend_agent.py`)
+Implements server-side features via Claude Code.
 
-## Frontend Agent
+Task types: `implement_feature`, `fix_bug`, `write_tests`, `refactor_code`
 
-Builds the user interface and client-side logic.
-Responsibilities:
-● Interpret design and product requirements
-● Build responsive and accessible UI components
-● Integrate with backend APIs
-● Write tests for all features
-● Manage branches and pull requests
-● Ensure good performance and usability
+Each task: fetch issue → create branch → Claude Code makes changes → validate (pytest) → commit → open PR
 
-## UI/UX Designer Agent
+### Frontend Agent (`agents/frontend_agent.py`)
+Implements client-side features and UI.
 
-Designs the product experience and interface.
-Responsibilities:
+Task types: `implement_feature`, `fix_bug`, `improve_ui`
 
+Specialization: React/Tailwind focused prompts, accessibility checks, responsive design.
+
+### Database Agent (`agents/database_agent.py`)
+Designs the data model and manages migrations.
+
+Output: schema files, SQLAlchemy models, Alembic migration scripts — all in the project directory.
+
+### DevOps Agent (`agents/devops_agent.py`)
+Sets up deployment infrastructure.
+
+Output: `Dockerfile`, `.github/workflows/ci.yml` (runs tests on push), environment configuration.
+
+### QA Agent (`agents/qa_agent.py`)
+Reviews every PR opened by backend/frontend workers.
+
+Process: fetch PR diff → Claude Code reviews for correctness, test coverage, and code quality → approve + merge or request changes → close linked issue → auto-enqueue another QA review if needed.
+
+### Assignment Manager (`agents/assignment_manager.py`)
+The Redis interface. Not an "agent" but the queue system that connects everything.
+
+- Classifies each GitHub issue by labels/title keywords → assigns to the right agent queue
+- Queue key: `queue:agent:{agent_type}` (sorted set, lower score = higher priority)
+- Task metadata: `task:{repo}:{issue}` (hash with status, timestamps, agent type)
+
+### AgentWorkerDaemon (`agents/worker_daemon.py`)
+Runs one asyncio loop per agent type. Each loop polls Redis every 10 seconds.
+
+Process per task: claim → `agent.execute_task()` → on success: GitHub comment + "in-review" label + enqueue QA → on failure: GitHub comment + "needs-attention" label.
+
+After every task: checks if all queues are empty and all workers idle → if so, triggers `_auto_deploy()`.
+
+### PipelineMonitor (`agents/pipeline_monitor.py`)
+Watches GitHub Actions CI every 30 seconds for the active project's repo.
+
+On failed run: downloads logs (ZIP) → Claude Code auto-fixes → pushes fix → notifies Discord.
+Also detects stalled workers (task running > `WORKER_STALL_MINUTES`) and alerts via Discord.
+
+### Deployer (`agents/deployer.py`)
+Turns a project directory into a live URL.
+
+Process:
+1. `docker build` the image
+2. Find a free port (tracked in `~/.ai-dev-pipeline/port_allocations.json`)
+3. `docker run -d` the container
+4. Update `~/.cloudflared/config.yml` with new ingress rule
+5. `cloudflared tunnel route dns` to create the DNS record
+6. `sudo systemctl reload cloudflared`
+7. Return `https://{name}.devbot.site`
+
+---
+
+## Data Flow
 
 ```
-● Create wireframes and mockups
-● Define design systems and components
-● Ensure usability and accessibility
-● Provide design documentation for frontend development
-● Iterate on designs based on QA or user feedback
+User: !new Build a URL shortener
+
+1.  discord_bot → master.handle_new_project()
+2.  pm_agent.create_prd_from_scratch() → PRD.md (40–50KB)
+3.  project_mgr.setup_complete_project() → GitHub repo + 15–30 issues
+4.  Master saves .project_metadata.json
+5.  Discord: "✅ Project created — 23 issues"
+
+User: !run pipeline
+
+6.  master.handle_run_full_pipeline()
+    a. database_agent.setup_database_for_project() → schema files
+    b. devops_agent.setup_cicd_pipeline() → Dockerfile + CI workflow
+    c. assignment_manager.assign_all_issues() → all issues queued to Redis
+    d. github_pusher.push_project_to_github() → files committed and pushed
+    e. PipelineMonitor started → CI being watched
+    f. deployer.deploy_project() → Docker + Cloudflare
+7.  Discord: "🎉 Pipeline complete. 🌐 https://project-xxx.devbot.site"
+
+User: !workers start
+
+8.  AgentWorkerDaemon started (background asyncio tasks)
+9.  Workers poll Redis every 10s
+10. backend worker: claim issue → Claude Code implements → tests pass → PR opened → QA enqueued
+11. qa worker: claim PR review → approve + merge → issue closed
+12. When all queues drain → _auto_deploy() → Discord "All tasks complete, redeployed"
 ```
-## Database Agent
 
-Manages all data-related architecture and performance.
-Responsibilities:
-● Design database schemas
-● Create and manage migrations
-● Ensure data integrity and consistency
-● Optimize queries and performance
-● Implement backup and recovery strategies
+---
 
-## DevOps / Infrastructure Agent
+## Infrastructure
 
-Handles deployment, environments, and system reliability.
-Responsibilities:
-● Set up infrastructure and environments
-● Configure CI/CD pipelines
-● Manage secrets and environment variables
-● Monitor system performance and uptime
-● Set up logging, metrics, and alerts
+| Component | Technology | Why |
+|-----------|-----------|-----|
+| Code generation | Claude Code CLI (subprocess) | No per-token cost — uses Claude Pro subscription |
+| Task queues | Redis sorted sets | Priority ordering built-in, easy to inspect |
+| Deployment | Docker + Cloudflare Tunnel | Free, secure, HTTPS, no firewall rules |
+| Dashboard | FastAPI + Jinja2 + HTMX | No build step, no npm, works with Python |
+| GitHub integration | REST API (`github_client.py`) | Issues, PRs, branches, CI runs |
+| CI/CD | GitHub Actions | Runs tests on every push |
+| Persistent state | JSON files on disk | `.project_metadata.json` per project |
 
+---
 
-```
-● Handle scaling and performance optimization
-```
-## QA Tester Agent
+## What's Planned Next
 
-Validates product quality and stability.
-Responsibilities:
-● Run automated tests from frontend and backend
-● Maintain a comprehensive test suite
-● Track passing and failing tests
-● Propose fixes for failures
-● Review code for best practices
-● Test end-to-end user flows in a browser
+The system is complete through Phase 7. The next phases (documented in `ROADMAP.md`):
 
-## Security Agent (Optional but Recommended)
+- **Phase 8** — Production hardening (Dockerfile validation, name sanitization, graceful shutdown, `requirements.txt` fix)
+- **Phase 9** — Full management dashboard (project creation from UI, live logs, issue management, PR review, worker controls)
+- **Phase 10** — MCP server integrations (Playwright browser testing, Supabase managed DB, Sentry error monitoring, Vercel frontend deploy)
+- **Phase 11** — New agents: Security Agent (OWASP scanning), UX/Design Agent, Documentation Agent, Performance Agent
+- **Phase 12** — Team features: multi-user support, cost tracking, project templates, plugin system
 
-Ensures the system is secure and compliant.
-Responsibilities:
-● Scan for vulnerabilities
-● Review authentication and authorization flows
-● Monitor dependencies for security risks
-● Enforce secure coding practices
-● Manage secrets and sensitive data policies
+---
 
-## Knowledge and Documentation Agent (Optional)
+## Design Principles
 
-Maintains project knowledge and technical documentation.
-
-
-Responsibilities:
-● Generate and update technical documentation
-● Maintain API docs and architecture records
-● Create onboarding and usage guides
-● Store and retrieve project knowledge efficiently
-
-
+- **Zero intervention** — the pipeline should complete a full project without the user doing anything after `!new`
+- **No API cost** — use Claude Code CLI (Claude Pro subscription) not the Anthropic API, so code generation is free
+- **Observable** — everything is visible in Discord, the web dashboard, GitHub, and logs
+- **Resilient** — CI failures are auto-fixed, worker failures create "needs-attention" labels so nothing is silently dropped
+- **Composable** — each agent has a single job and communicates through GitHub + Redis, not direct function calls

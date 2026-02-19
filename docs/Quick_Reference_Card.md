@@ -1,470 +1,225 @@
-# AI Development Pipeline - Quick Reference Card
+# AI Development Pipeline — Quick Reference
 
-> **Keep This Handy**: Essential commands, file locations, and troubleshooting steps for quick access during development.
+**Last Updated**: February 19, 2026
 
 ---
 
-## 🚀 Quick Start Commands
+## Daily Startup
 
-### System Setup (First Time Only)
+### Recommended: tmux (one command)
 ```bash
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -bash -
-sudo apt install -y nodejs
-
-# Install Claude Code
-curl -fsSL https://claude.ai/install.sh | sh
-claude login
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Install Redis
-sudo apt install -y redis-server
-sudo systemctl start redis-server
-sudo systemctl enable redis-server
+tmux new-session -s pipeline -d
+tmux split-window -h -t pipeline
+tmux split-window -v -t pipeline:0.1
+tmux send-keys -t pipeline:0.0 'cd ~/ai-dev-pipeline && venv/bin/python api/discord_bot.py' Enter
+tmux send-keys -t pipeline:0.1 'cd ~/ai-dev-pipeline && venv/bin/python scripts/run_dashboard.py' Enter
+tmux attach -t pipeline
 ```
 
-### Daily Development Workflow
+### Or two terminals
 ```bash
-# 1. Navigate to project
-cd ~/ai-dev-pipeline
+# Terminal 1 — Discord bot
+cd ~/ai-dev-pipeline && venv/bin/python api/discord_bot.py
 
-# 2. Activate Python environment
-source venv/bin/activate
+# Terminal 2 — Web dashboard (http://<vm-ip>:8080)
+cd ~/ai-dev-pipeline && venv/bin/python scripts/run_dashboard.py
+```
 
-# 3. Health check
-./scripts/health_check.sh
-
-# 4. Start Discord bot
-python api/discord_bot.py
-
-# 5. (Optional) Start web server
-python api/web_server.py
+Workers are started from Discord, not a separate terminal:
+```
+!workers start
 ```
 
 ---
 
-## 📂 Critical File Locations
+## Discord Commands
 
-| File | Location | Purpose |
-|------|----------|---------|
-| Master Agent | `agents/master_agent.py` | Core orchestration logic |
-| Discord Bot | `api/discord_bot.py` | User interface |
-| Environment Config | `.env` | Secrets & configuration |
-| Current State | `CURRENT_STATE.md` | Project status snapshot |
-| Logs | `logs/claude_code_YYYYMMDD.log` | All interactions |
-| Projects | `projects/` | Generated projects |
-| Requirements | `requirements.txt` | Python dependencies |
-
----
-
-## 🎯 Claude Code CLI Essentials
-
-### Basic Usage
-```bash
-# Simple prompt
-claude -p "Your instruction here"
-
-# With specific tools
-claude -p "Your instruction" --allowedTools "Write" "Edit" "Bash"
-
-# With context files
-claude -p "Your instruction" --context file1.txt --context file2.md
-
-# In specific directory
-cd /path/to/project && claude -p "Your instruction"
-```
-
-### Example Commands
-```bash
-# Create a file
-claude -p "Create a hello.py that prints Hello World"
-
-# Fix code
-claude -p "Fix any bugs in app.py"
-
-# Add feature
-claude -p "Add user authentication to the existing Flask app"
-
-# Create documentation
-claude -p "Generate API documentation for all endpoints"
-```
+| Command | Description |
+|---------|-------------|
+| `!new <description>` | Create a new project (PRD + GitHub + CI + Deploy) |
+| `!run pipeline` | Run full pipeline on the active project |
+| `!status` | Active project status + queue sizes |
+| `!projects` | List all projects with deploy URLs |
+| `!switch <name>` | Switch the active project |
+| `!deploy` | Deploy active project (Docker + Cloudflare) |
+| `!deploy redeploy` | Rebuild and redeploy from scratch |
+| `!workers start` | Start background worker agents |
+| `!workers stop` | Stop workers (graceful — finishes current task) |
+| `!workers status` | Queue sizes + per-agent worker states |
+| `!monitor start` | Start CI/CD monitor for active project |
+| `!monitor stop` | Stop CI/CD monitor |
+| `!monitor status` | Show monitor state and last check time |
+| `!task <description>` | Run an ad-hoc Claude Code task |
+| `!help` | Show all commands in Discord |
 
 ---
 
-## 🤖 Discord Bot Commands
+## Web Dashboard Routes
 
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `!new` | `!new <description>` | Start new project |
-| `!status` | `!status` | Check project status |
-| `!task` | `!task <description>` | Implement a feature |
-| `!deploy` | `!deploy` | Prepare deployment |
-| `!help` | `!help` | Show help message |
-| DM / @mention | Message the bot | General conversation |
+| URL | Description |
+|-----|-------------|
+| `http://<vm-ip>:8080/` | Main dashboard — all projects |
+| `http://<vm-ip>:8080/api/status` | JSON status snapshot |
+| `http://<vm-ip>:8080/projects/<name>` | Project detail page |
+| `POST /projects/<name>/deploy` | Trigger deploy (form submit) |
+| `https://dashboard.devbot.site` | Public URL (via Cloudflare Tunnel) |
 
-### Example Discord Interactions
-```
-!new Create a REST API for a todo app with FastAPI
+---
 
-!task Add user authentication with JWT tokens
+## Key File Locations
 
-!status
+| Purpose | Path |
+|---------|------|
+| Orchestrator | `agents/master_agent.py` |
+| Discord bot | `api/discord_bot.py` |
+| Web dashboard | `api/dashboard.py` |
+| Worker daemon | `agents/worker_daemon.py` |
+| Task queues (Redis) | `agents/assignment_manager.py` |
+| CI monitor | `agents/pipeline_monitor.py` |
+| Docker deployer | `agents/deployer.py` |
+| GitHub client | `agents/github_client.py` |
+| Env config | `.env` |
+| Logs | `logs/claude_code_YYYYMMDD.log` |
+| Generated projects | `projects/` |
+| Port allocations | `~/.ai-dev-pipeline/port_allocations.json` |
+| Cloudflare config | `~/.cloudflared/config.yml` |
 
-!deploy
+---
+
+## Health Checks
+
+```bash
+redis-cli ping                        # PONG
+docker ps                             # no error
+sudo systemctl status cloudflared     # active (running)
+curl http://localhost:8080/api/status # JSON response
+venv/bin/python -m pytest tests/ -v   # 266/266 passing
 ```
 
 ---
 
-## 🔧 Troubleshooting Quick Fixes
-
-### Claude Code Issues
-```bash
-# Not found
-which claude
-# If missing: curl -fsSL https://claude.ai/install.sh | sh
-
-# Authentication expired
-claude login
-```
-
-### Python Issues
-```bash
-# Virtual environment not activated
-source venv/bin/activate
-
-# Missing packages
-pip install -r requirements.txt
-
-# Import errors
-python -c "from agents.master_agent import MasterAgent; print('OK')"
-```
-
-### Redis Issues
-```bash
-# Check if running
-redis-cli ping  # Should return PONG
-
-# Restart
-sudo systemctl restart redis-server
-
-# Check status
-sudo systemctl status redis-server
-```
-
-### Discord Bot Issues
-```bash
-# Check token
-cat .env | grep DISCORD_BOT_TOKEN
-
-# Kill stuck process
-pkill -f discord_bot.py
-
-# Restart bot
-python api/discord_bot.py
-```
-
-### ChromaDB Issues
-```bash
-# Check if data persists
-ls -la memory/vector_store/
-
-# Test in Python
-python -c "import chromadb; client = chromadb.Client(); print('OK')"
-```
-
----
-
-## 📊 System Health Check
-
-### Quick Status
-```bash
-# All-in-one check
-./scripts/health_check.sh
-
-# Individual checks
-claude --version           # Claude Code
-python --version          # Python
-docker --version          # Docker
-redis-cli ping            # Redis
-node --version            # Node.js
-```
-
-### Check Running Services
-```bash
-# Python processes
-ps aux | grep python
-
-# Docker containers
-docker ps -a
-
-# System resources
-df -h                     # Disk space
-free -h                   # Memory
-top                       # CPU usage
-```
-
----
-
-## 🗂️ Project Structure
-
-```
-ai-dev-pipeline/
-├── agents/               # Agent implementations
-│   ├── master_agent.py
-│   ├── product_manager_agent.py
-│   └── ...
-├── api/                  # Interface layer
-│   ├── discord_bot.py
-│   ├── whatsapp_bot.py
-│   └── web_server.py
-├── memory/               # Persistent storage
-│   └── vector_store/
-├── projects/             # Generated projects
-├── logs/                 # All logs
-├── config/               # Configuration
-│   └── .env
-├── scripts/              # Utility scripts
-│   └── health_check.sh
-├── docs/                 # Documentation
-├── venv/                 # Python virtual env
-└── requirements.txt      # Dependencies
-```
-
----
-
-## 🔑 Environment Variables (.env)
+## Environment Variables (`.env`)
 
 ```env
-# Discord
-DISCORD_BOT_TOKEN=your_token_here
+# Required
+GITHUB_TOKEN=ghp_...
+GITHUB_USERNAME=your-username
+DISCORD_BOT_TOKEN=...
 
-# GitHub
-GITHUB_TOKEN=your_github_token
+# Cloudflare Tunnel
+CLOUDFLARE_TUNNEL_NAME=devbot-pipeline
+CLOUDFLARE_TUNNEL_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+DEPLOY_DOMAIN=devbot.site
 
-# Supabase
-SUPABASE_URL=your_url
-SUPABASE_KEY=your_key
-
-# Redis
+# Redis (defaults work for local)
 REDIS_HOST=localhost
 REDIS_PORT=6379
+
+# Optional tuning
+MIN_TEST_COVERAGE=80
+WORKER_POLL_INTERVAL=10
+WORKER_AGENTS=backend,frontend,database,devops,qa
 ```
 
 ---
 
-## 📝 Git Workflow
+## Common Troubleshooting
 
-### Daily Commands
+| Problem | Fix |
+|---------|-----|
+| `ModuleNotFoundError: fastapi` | `venv/bin/pip install fastapi uvicorn jinja2 python-multipart` |
+| `ModuleNotFoundError: yaml` | `venv/bin/pip install pyyaml` |
+| `redis.exceptions.ConnectionError` | `sudo systemctl start redis-server` |
+| Discord bot not responding | Check `DISCORD_BOT_TOKEN` in `.env` |
+| `docker: permission denied` | `sudo usermod -aG docker shaheer && newgrp docker` |
+| Cloudflare config not found | `sudo cp ~/.cloudflared/config.yml /etc/cloudflared/config.yml` |
+| Cloudflare YAML parse error | Ensure no leading spaces — root keys (`tunnel:`, `ingress:`) must start at column 0 |
+| Dashboard 404 on `/projects/x` | Project not loaded — check `.project_metadata.json` exists |
+| Workers claiming tasks but idle | Agent type mismatch — check `WORKER_AGENTS` env var |
+
+---
+
+## Shell Aliases (add to `~/.bashrc`)
+
 ```bash
-# Check status
-git status
-
-# Add changes
-git add .
-
-# Commit
-git commit -m "Description of changes"
-
-# Push
-git push origin main
-
-# View history
-git log --oneline -10
+alias aip='cd ~/ai-dev-pipeline'
+alias aipbot='cd ~/ai-dev-pipeline && venv/bin/python api/discord_bot.py'
+alias aipdash='cd ~/ai-dev-pipeline && venv/bin/python scripts/run_dashboard.py'
+alias aiptest='cd ~/ai-dev-pipeline && venv/bin/python -m pytest tests/ -v'
+alias aiplog='tail -f ~/ai-dev-pipeline/logs/claude_code_$(date +%Y%m%d).log'
 ```
 
-### Phase Completion
+---
+
+## Running Tests
+
 ```bash
-# Tag a phase
-git tag -a phase1-complete -m "Phase 1 complete"
-git push origin phase1-complete
+# Full suite
+venv/bin/python -m pytest tests/ -v
 
-# Create checkpoint
-git commit -m "Phase 1 checkpoint - all core features working"
+# Single file
+venv/bin/python -m pytest tests/test_deployer.py -v
+
+# Single test
+venv/bin/python -m pytest tests/test_deployer.py::TestBuildDockerImage::test_build_success -v
+
+# With output (shows print statements)
+venv/bin/python -m pytest tests/ -v -s
 ```
 
 ---
 
-## 🐛 Common Error Messages & Fixes
+## Redis Queue Inspection
 
-| Error | Fix |
-|-------|-----|
-| `claude: command not found` | `curl -fsSL https://claude.ai/install.sh \| sh` |
-| `ModuleNotFoundError` | `source venv/bin/activate && pip install -r requirements.txt` |
-| `Redis connection refused` | `sudo systemctl restart redis-server` |
-| `Discord login failed` | Check `DISCORD_BOT_TOKEN` in `.env` |
-| `Permission denied` | `chmod +x script.sh` or use `sudo` |
-| `Port already in use` | `lsof -i :8000` then `kill <PID>` |
-
----
-
-## 🎨 Master Agent API
-
-### Process User Message
-```python
-from agents.master_agent import MasterAgent
-
-agent = MasterAgent()
-response = await agent.process_user_message(
-    message="Your request here",
-    user_id="user_123"
-)
-```
-
-### Call Claude Code Directly
-```python
-result = await agent.call_claude_code(
-    prompt="Your instruction",
-    project_path="/path/to/project",
-    allowed_tools=["Write", "Edit", "Bash"]
-)
-```
-
-### Store & Retrieve Memory
-```python
-# Store
-await agent.store_memory(
-    category="user_message",
-    content="Message content",
-    metadata={"user_id": "123"}
-)
-
-# Retrieve
-results = await agent.retrieve_memory(
-    query="Find authentication info",
-    n_results=5
-)
-```
-
----
-
-## 📞 Support & Resources
-
-### Documentation
-- **Implementation Plan**: `docs/AI_Development_Pipeline_Implementation_Plan.md`
-- **Handoff Guide**: `docs/Project_Handoff_Guide.md`
-- **This Reference**: `docs/Quick_Reference_Card.md`
-
-### External Resources
-- Claude Code: https://code.claude.com/docs
-- Discord.py: https://discordpy.readthedocs.io/
-- FastAPI: https://fastapi.tiangolo.com/
-- ChromaDB: https://docs.trychroma.com/
-
-### Logs Location
 ```bash
-# Claude Code interactions
-tail -f logs/claude_code_$(date +%Y%m%d).log
+# Queue sizes
+redis-cli ZCARD queue:agent:backend
+redis-cli ZCARD queue:agent:frontend
+redis-cli ZCARD queue:agent:qa
 
-# Discord bot (if redirected)
-tail -f logs/discord_bot.log
+# Peek at queue contents
+redis-cli ZRANGE queue:agent:backend 0 -1 WITHSCORES
 
-# System logs
-journalctl -u redis-server -f
+# Clear a stuck queue (use with care)
+redis-cli DEL queue:agent:backend
 ```
 
 ---
 
-## ⚡ Performance Tips
+## Docker / Container Management
 
-1. **Keep prompts concise** - Claude Code works best with focused instructions
-2. **Use context files** - Instead of repeating info in prompts
-3. **Batch related tasks** - Combine similar operations in one call
-4. **Monitor logs** - Watch for patterns and optimize
-5. **Clean up projects** - Archive old projects to save space
-
----
-
-## 🎯 Testing Checklist
-
-### Before Committing Changes
-- [ ] Run health check script
-- [ ] Test Discord bot responds
-- [ ] Verify Master Agent imports
-- [ ] Check Redis connection
-- [ ] Run quick functionality test
-- [ ] Review error logs
-- [ ] Update CURRENT_STATE.md
-
-### Before Starting New Phase
-- [ ] All previous phase tests passing
-- [ ] Documentation updated
-- [ ] Git committed and pushed
-- [ ] No blocking issues
-- [ ] Dependencies installed
-- [ ] Services running
-
----
-
-## 💡 Pro Tips
-
-1. **Use aliases** in your `.bashrc`:
-   ```bash
-   alias aip='cd ~/ai-dev-pipeline && source venv/bin/activate'
-   alias aiph='./scripts/health_check.sh'
-   alias aiplog='tail -f logs/claude_code_$(date +%Y%m%d).log'
-   ```
-
-2. **Create tmux sessions** for long-running processes:
-   ```bash
-   tmux new -s discord-bot
-   python api/discord_bot.py
-   # Ctrl+B, D to detach
-   tmux attach -t discord-bot  # To reattach
-   ```
-
-3. **Monitor with watch**:
-   ```bash
-   watch -n 2 'ps aux | grep python'
-   ```
-
-4. **Quick backup**:
-   ```bash
-   tar -czf backup_$(date +%Y%m%d).tar.gz ~/ai-dev-pipeline
-   ```
-
----
-
-## 🚨 Emergency Commands
-
-### System Unresponsive
 ```bash
-# Kill all Python processes
-pkill -9 python
+# List running containers (deployed projects)
+docker ps
 
-# Restart all services
+# View logs for a project container
+docker logs <project-name>
+
+# Stop a container
+docker stop <project-name>
+
+# Remove container and image (full cleanup)
+docker stop <project-name> && docker rm <project-name> && docker rmi <project-name>
+
+# Check port allocations
+cat ~/.ai-dev-pipeline/port_allocations.json
+```
+
+---
+
+## Emergency Recovery
+
+```bash
+# Kill stuck Python processes
+pkill -f discord_bot.py
+pkill -f run_dashboard.py
+
+# Restart Redis
 sudo systemctl restart redis-server
-cd ~/ai-dev-pipeline && source venv/bin/activate
-python api/discord_bot.py &
+
+# Restart Cloudflare Tunnel
+sudo systemctl restart cloudflared
+
+# Clear all Redis queues (drops all pending tasks)
+redis-cli FLUSHDB   # WARNING: destructive
 ```
-
-### Disk Space Full
-```bash
-# Find large files
-du -sh ~/ai-dev-pipeline/* | sort -h
-
-# Clean up logs
-find logs/ -name "*.log" -mtime +7 -delete
-
-# Clean up old projects
-# (Manually review first!)
-ls -lat projects/
-```
-
-### Git Issues
-```bash
-# Undo last commit (keep changes)
-git reset --soft HEAD~1
-
-# Discard all changes
-git reset --hard HEAD
-
-# Create recovery branch
-git checkout -b recovery-$(date +%Y%m%d)
-```
-
----
-
-*Quick Reference v1.0 - Keep this handy! 🚀*
