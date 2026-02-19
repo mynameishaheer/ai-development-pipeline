@@ -497,17 +497,225 @@ Closes #{issue_number}
         return pr
     
     async def fix_bug(self, task: Dict) -> Dict:
-        """Fix a bug reported in an issue"""
-        # Similar to implement_feature but focused on bug fixes
-        return {"success": True, "message": "Bug fix not yet implemented"}
-    
+        """
+        Fix a bug reported in a GitHub issue.
+
+        Workflow: fetch issue → create fix branch → Claude Code fixes it →
+        validate → commit → PR
+        """
+        repo_name = task.get("repo_name", "")
+        issue_number = task.get("issue_number", 0)
+
+        await self.log_action("fix_bug", "started", {
+            "repo": repo_name, "issue": issue_number
+        })
+
+        try:
+            issue = await self._get_issue_details(repo_name, issue_number)
+            branch_name = f"fix/issue-{issue_number}"
+            await self._create_feature_branch(repo_name, branch_name)
+            self.current_branch = branch_name
+            self.current_issue = issue_number
+
+            project_path = await self._setup_local_repo(repo_name, branch_name)
+
+            prompt = f"""
+You are fixing a bug in a FastAPI backend application.
+
+Issue #{issue_number}: {issue.get('title', '')}
+
+Bug description:
+{issue.get('body', '')}
+
+Tasks:
+1. Read the existing code to understand the bug
+2. Identify the root cause
+3. Fix the bug with minimal changes — do not refactor unrelated code
+4. Ensure existing tests still pass
+5. Add a regression test that would catch this bug
+
+Follow Python best practices and keep changes focused.
+"""
+            await self.call_claude_code(
+                prompt=prompt,
+                project_path=str(project_path),
+                allowed_tools=["Write", "Edit", "Bash", "Read"],
+            )
+
+            await self._validate_implementation(project_path, issue_number)
+            await self._commit_and_push(project_path, branch_name, issue_number)
+            pr = await self._create_pull_request(
+                repo_name=repo_name,
+                branch_name=branch_name,
+                issue_number=issue_number,
+                issue_title=f"fix: {issue.get('title', '')}",
+            )
+
+            await self.log_action("fix_bug", "completed", {
+                "repo": repo_name, "issue": issue_number, "pr_number": pr.get("number")
+            })
+            await self.send_status_update("bug_fixed", {
+                "repo": repo_name, "issue": issue_number,
+                "pr_url": pr.get("html_url"), "branch": branch_name,
+            })
+
+            return {
+                "success": True,
+                "issue_number": issue_number,
+                "branch": branch_name,
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("html_url"),
+                "message": "Bug fix implemented and PR created",
+            }
+
+        except Exception as e:
+            await self.log_action("fix_bug", "failed", {"error": str(e)})
+            raise
+
     async def write_tests(self, task: Dict) -> Dict:
-        """Write additional tests"""
-        return {"success": True, "message": "Write tests not yet implemented"}
-    
+        """
+        Write missing test coverage for a module specified in the issue.
+
+        Workflow: fetch issue → create tests branch → Claude Code writes tests →
+        validate → commit → PR
+        """
+        repo_name = task.get("repo_name", "")
+        issue_number = task.get("issue_number", 0)
+
+        await self.log_action("write_tests", "started", {
+            "repo": repo_name, "issue": issue_number
+        })
+
+        try:
+            issue = await self._get_issue_details(repo_name, issue_number)
+            branch_name = f"tests/issue-{issue_number}"
+            await self._create_feature_branch(repo_name, branch_name)
+            self.current_branch = branch_name
+            self.current_issue = issue_number
+
+            project_path = await self._setup_local_repo(repo_name, branch_name)
+
+            prompt = f"""
+You are writing missing test coverage for a FastAPI backend application.
+
+Issue #{issue_number}: {issue.get('title', '')}
+
+Details:
+{issue.get('body', '')}
+
+Tasks:
+1. Identify which modules / functions have insufficient test coverage
+2. Write pytest tests covering the missing cases
+3. Include unit tests, edge cases, and error scenarios
+4. Aim for 90%+ coverage on the targeted modules
+5. Use pytest fixtures and mocking appropriately
+
+Do NOT modify the production code — only add/edit test files.
+"""
+            await self.call_claude_code(
+                prompt=prompt,
+                project_path=str(project_path),
+                allowed_tools=["Write", "Edit", "Bash", "Read"],
+            )
+
+            await self._validate_implementation(project_path, issue_number)
+            await self._commit_and_push(project_path, branch_name, issue_number)
+            pr = await self._create_pull_request(
+                repo_name=repo_name,
+                branch_name=branch_name,
+                issue_number=issue_number,
+                issue_title=f"tests: {issue.get('title', '')}",
+            )
+
+            await self.log_action("write_tests", "completed", {
+                "repo": repo_name, "issue": issue_number, "pr_number": pr.get("number")
+            })
+
+            return {
+                "success": True,
+                "issue_number": issue_number,
+                "branch": branch_name,
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("html_url"),
+                "message": "Tests written and PR created",
+            }
+
+        except Exception as e:
+            await self.log_action("write_tests", "failed", {"error": str(e)})
+            raise
+
     async def refactor_code(self, task: Dict) -> Dict:
-        """Refactor existing code"""
-        return {"success": True, "message": "Refactor not yet implemented"}
+        """
+        Refactor existing code as described in the issue.
+
+        Workflow: fetch issue → create refactor branch → Claude Code refactors →
+        validate → commit → PR
+        """
+        repo_name = task.get("repo_name", "")
+        issue_number = task.get("issue_number", 0)
+
+        await self.log_action("refactor_code", "started", {
+            "repo": repo_name, "issue": issue_number
+        })
+
+        try:
+            issue = await self._get_issue_details(repo_name, issue_number)
+            branch_name = f"refactor/issue-{issue_number}"
+            await self._create_feature_branch(repo_name, branch_name)
+            self.current_branch = branch_name
+            self.current_issue = issue_number
+
+            project_path = await self._setup_local_repo(repo_name, branch_name)
+
+            prompt = f"""
+You are refactoring a FastAPI backend application.
+
+Issue #{issue_number}: {issue.get('title', '')}
+
+Refactoring requirements:
+{issue.get('body', '')}
+
+Tasks:
+1. Read the existing code that needs to be refactored
+2. Perform the refactoring as described in the issue
+3. Ensure all existing tests still pass after refactoring
+4. Do NOT add new features — only restructure/improve existing code
+5. Update docstrings/comments as needed
+6. Keep the public API unchanged (no breaking changes)
+
+Follow Python best practices (SOLID, DRY, etc.).
+"""
+            await self.call_claude_code(
+                prompt=prompt,
+                project_path=str(project_path),
+                allowed_tools=["Write", "Edit", "Bash", "Read"],
+            )
+
+            await self._validate_implementation(project_path, issue_number)
+            await self._commit_and_push(project_path, branch_name, issue_number)
+            pr = await self._create_pull_request(
+                repo_name=repo_name,
+                branch_name=branch_name,
+                issue_number=issue_number,
+                issue_title=f"refactor: {issue.get('title', '')}",
+            )
+
+            await self.log_action("refactor_code", "completed", {
+                "repo": repo_name, "issue": issue_number, "pr_number": pr.get("number")
+            })
+
+            return {
+                "success": True,
+                "issue_number": issue_number,
+                "branch": branch_name,
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("html_url"),
+                "message": "Refactoring complete and PR created",
+            }
+
+        except Exception as e:
+            await self.log_action("refactor_code", "failed", {"error": str(e)})
+            raise
 
 
 # ==========================================

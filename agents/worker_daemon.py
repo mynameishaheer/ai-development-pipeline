@@ -39,9 +39,12 @@ class AgentWorkerDaemon:
 
     After backend/frontend complete with a PR, automatically enqueues
     a QA review task. QA worker handles merge + close on approval.
+
+    When ALL queues across all agent types drain to 0 simultaneously,
+    triggers auto-deploy via deployer.deploy_project() and notifies Discord.
     """
 
-    def __init__(self, agent_types: Optional[List[str]] = None):
+    def __init__(self, agent_types: Optional[List[str]] = None, master=None):
         self.logger = get_logger("worker_daemon", agent_type="master")
         self.assignment_manager = AssignmentManager()
         self.github = create_github_client()
@@ -61,6 +64,11 @@ class AgentWorkerDaemon:
 
         # ISO-format start time for the current task per worker (used for stall detection)
         self._task_start_times: Dict[str, str] = {}
+
+        # Phase 6: all-tasks-done detection
+        # Holds a reference to MasterAgent so we can trigger deploy + notify
+        self._master = master
+        self._all_tasks_done_notified: bool = False
 
         self.logger.info(
             "AgentWorkerDaemon initialized",
@@ -154,6 +162,7 @@ class AgentWorkerDaemon:
 
                 self._worker_states[agent_type] = "idle"
                 self._task_start_times.pop(agent_type, None)
+                await self._check_and_trigger_deploy()
 
             except Exception as loop_error:
                 # Loop-level error (e.g., Redis connection issue) — back off
@@ -271,6 +280,7 @@ class AgentWorkerDaemon:
 
                 self._worker_states[AgentType.QA] = "idle"
                 self._task_start_times.pop(AgentType.QA, None)
+                await self._check_and_trigger_deploy()
 
             except Exception as loop_error:
                 self.logger.error(
@@ -380,6 +390,89 @@ class AgentWorkerDaemon:
         except Exception as e:
             self.logger.warning(
                 f"GitHub sync on failure failed for issue #{issue_number}: {e}"
+            )
+
+    # ==========================================
+    # ALL-TASKS-DONE DETECTION (Phase 6)
+    # ==========================================
+
+    def _all_queues_empty(self) -> bool:
+        """Return True when every agent queue has 0 pending tasks."""
+        try:
+            queue_status = self.assignment_manager.get_queue_status()
+            return all(
+                info.get("pending_tasks", 0) == 0
+                for info in queue_status.values()
+            )
+        except Exception:
+            return False
+
+    def _all_workers_idle(self) -> bool:
+        """Return True when every worker is idle (not currently processing a task)."""
+        return all(
+            state in ("idle", "polling", "stopped")
+            for state in self._worker_states.values()
+        )
+
+    async def _check_and_trigger_deploy(self):
+        """
+        If all queues are empty and all workers are idle, trigger auto-deploy once.
+        Resets the flag when new tasks appear so the next drain re-triggers.
+        """
+        if self._all_queues_empty() and self._all_workers_idle():
+            if not self._all_tasks_done_notified:
+                self._all_tasks_done_notified = True
+                self.logger.info("All queues empty — triggering auto-deploy")
+                await self._auto_deploy()
+        else:
+            # New tasks arrived — allow another notification later
+            self._all_tasks_done_notified = False
+
+    async def _auto_deploy(self):
+        """Trigger deploy_project() for the active project and notify Discord."""
+        if not self._master:
+            return
+
+        project = self._master.current_project
+        if not project:
+            return
+
+        project_path = project.get("path", "")
+        project_name = project.get("name", "")
+        if not project_path or not project_name:
+            return
+
+        try:
+            from agents.deployer import deploy_project
+            deploy_result = await deploy_project(
+                project_path=project_path,
+                project_name=project_name,
+            )
+
+            if deploy_result["success"]:
+                url = deploy_result["url"]
+                project["deploy_url"] = url
+                await self._master.save_project_metadata()
+                msg = (
+                    f"🎉 **All tasks complete!** `{project_name}` has been deployed.\n"
+                    f"🌐 Live at: {url}"
+                )
+                self.logger.info(f"Auto-deploy succeeded: {url}")
+            else:
+                err = deploy_result.get("error", "unknown error")
+                msg = (
+                    f"✅ **All tasks complete** for `{project_name}`, "
+                    f"but auto-deploy failed: {err[:200]}"
+                )
+                self.logger.warning(f"Auto-deploy failed: {err}")
+
+            await self._master._notify(msg)
+
+        except Exception as exc:
+            self.logger.error(f"Auto-deploy exception: {exc}", exc_info=True)
+            await self._master._notify(
+                f"✅ **All tasks complete** for `{project_name}`, "
+                f"but auto-deploy raised an error: {str(exc)[:200]}"
             )
 
     # ==========================================

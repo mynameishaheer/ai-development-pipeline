@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} — AI Dev Pipeline{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center gap-3">
+    <a href="/" class="text-gray-500 hover:text-gray-300 text-sm">← Dashboard</a>
+    <span class="text-gray-600">/</span>
+    <span class="font-mono text-indigo-300">{{ project.name }}</span>
+    {% if project.active %}
+    <span class="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded-full">active</span>
+    {% endif %}
+</div>
+
+<!-- Project details card -->
+<div class="bg-gray-800 border border-gray-700 rounded-xl p-6 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <div>
+            <p class="text-gray-500 mb-1">Status</p>
+            <p class="text-gray-100">{{ project.get('status', 'unknown') }}</p>
+        </div>
+        <div>
+            <p class="text-gray-500 mb-1">Created</p>
+            <p class="text-gray-100">{{ project.get('created_at', 'N/A')[:19].replace('T', ' ') }}</p>
+        </div>
+        <div>
+            <p class="text-gray-500 mb-1">GitHub</p>
+            {% if project.repo_url %}
+            <a href="{{ project.repo_url }}" target="_blank"
+               class="text-indigo-400 hover:underline truncate block">
+                {{ project.repo_url }}
+            </a>
+            {% else %}
+            <p class="text-gray-600">Not set</p>
+            {% endif %}
+        </div>
+        <div>
+            <p class="text-gray-500 mb-1">Live URL</p>
+            {% if project.deploy_url %}
+            <a href="{{ project.deploy_url }}" target="_blank"
+               class="text-green-400 hover:underline">{{ project.deploy_url }}</a>
+            {% else %}
+            <p class="text-gray-600">Not deployed</p>
+            {% endif %}
+        </div>
+        <div>
+            <p class="text-gray-500 mb-1">Local Path</p>
+            <p class="font-mono text-xs text-gray-400 break-all">{{ project.get('path', 'N/A') }}</p>
+        </div>
+        <div>
+            <p class="text-gray-500 mb-1">CI Monitor</p>
+            <p class="{{ 'text-green-400' if project.monitor_running else 'text-gray-500' }}">
+                {{ '🔍 Running' if project.monitor_running else '⏹ Stopped' }}
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- Deploy action -->
+{% if not project.deploy_url %}
+<div class="mb-6">
+    <form method="post" action="/projects/{{ project.name }}/deploy">
+        <button type="submit"
+                class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+            🚀 Deploy this project
+        </button>
+    </form>
+</div>
+{% else %}
+<div class="mb-6">
+    <form method="post" action="/projects/{{ project.name }}/deploy">
+        <input type="hidden" name="redeploy" value="1">
+        <button type="submit"
+                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors">
+            🔄 Re-deploy
+        </button>
+    </form>
+</div>
+{% endif %}
+
+<!-- Queue sizes (live-polled) -->
+<div class="bg-gray-800 border border-gray-700 rounded-xl p-6"
+     hx-get="/api/status"
+     hx-trigger="load, every 5s"
+     hx-select="#queue-fragment"
+     hx-swap="innerHTML">
+    <p class="text-gray-500 text-sm">Loading queue status…</p>
+</div>
+<div id="queue-fragment" class="hidden"><!-- populated by API --></div>
+{% endblock %}

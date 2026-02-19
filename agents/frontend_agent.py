@@ -434,9 +434,149 @@ Closes #{issue_number}
         return pr
     
     async def fix_bug(self, task: Dict) -> Dict:
-        """Fix UI bug"""
-        return {"success": True, "message": "UI bug fix not yet implemented"}
-    
+        """
+        Fix a UI bug reported in a GitHub issue.
+
+        Workflow: fetch issue → create fix branch → Claude Code fixes it →
+        validate → commit → PR
+        """
+        repo_name = task.get("repo_name", "")
+        issue_number = task.get("issue_number", 0)
+
+        await self.log_action("fix_bug", "started", {
+            "repo": repo_name, "issue": issue_number
+        })
+
+        try:
+            issue = await self._get_issue_details(repo_name, issue_number)
+            branch_name = f"fix/ui-issue-{issue_number}"
+            await self._create_feature_branch(repo_name, branch_name)
+
+            project_path = await self._setup_local_repo(repo_name, branch_name)
+
+            prompt = f"""
+You are fixing a UI bug in a React frontend application.
+
+Issue #{issue_number}: {issue.get('title', '')}
+
+Bug description:
+{issue.get('body', '')}
+
+Tasks:
+1. Read the relevant React components and understand the bug
+2. Identify the root cause (state management, rendering, event handling, CSS, etc.)
+3. Fix the bug with minimal changes — do not refactor unrelated components
+4. Ensure the component still renders correctly and passes existing tests
+5. Add a regression test using React Testing Library
+
+Follow React best practices. Keep changes focused on the bug.
+"""
+            await self.call_claude_code(
+                prompt=prompt,
+                project_path=str(project_path),
+                allowed_tools=["Write", "Edit", "Bash", "Read"],
+            )
+
+            await self._validate_implementation(project_path, issue_number)
+            await self._commit_and_push(project_path, branch_name, issue_number)
+            pr = await self._create_pull_request(
+                repo_name=repo_name,
+                branch_name=branch_name,
+                issue_number=issue_number,
+                issue_title=f"fix(ui): {issue.get('title', '')}",
+            )
+
+            await self.log_action("fix_bug", "completed", {
+                "repo": repo_name, "issue": issue_number, "pr_number": pr.get("number")
+            })
+            await self.send_status_update("ui_bug_fixed", {
+                "repo": repo_name, "issue": issue_number,
+                "pr_url": pr.get("html_url"), "branch": branch_name,
+            })
+
+            return {
+                "success": True,
+                "issue_number": issue_number,
+                "branch": branch_name,
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("html_url"),
+                "message": "UI bug fix implemented and PR created",
+            }
+
+        except Exception as e:
+            await self.log_action("fix_bug", "failed", {"error": str(e)})
+            raise
+
     async def improve_ui(self, task: Dict) -> Dict:
-        """Improve existing UI"""
-        return {"success": True, "message": "UI improvement not yet implemented"}
+        """
+        Improve component styling / UX as described in the issue.
+
+        Workflow: fetch issue → create improvement branch → Claude Code improves
+        the UI → validate → commit → PR
+        """
+        repo_name = task.get("repo_name", "")
+        issue_number = task.get("issue_number", 0)
+
+        await self.log_action("improve_ui", "started", {
+            "repo": repo_name, "issue": issue_number
+        })
+
+        try:
+            issue = await self._get_issue_details(repo_name, issue_number)
+            branch_name = f"improve/ui-issue-{issue_number}"
+            await self._create_feature_branch(repo_name, branch_name)
+
+            project_path = await self._setup_local_repo(repo_name, branch_name)
+
+            prompt = f"""
+You are improving the styling and UX of a React frontend application.
+
+Issue #{issue_number}: {issue.get('title', '')}
+
+Improvement requirements:
+{issue.get('body', '')}
+
+Tasks:
+1. Read the existing components to understand current state
+2. Apply the requested UI/UX improvements:
+   - Better Tailwind CSS classes for visual polish
+   - Improved layout and responsiveness (mobile, tablet, desktop)
+   - Enhanced accessibility (ARIA labels, keyboard navigation, focus states)
+   - Better loading states, empty states, and error messages
+   - Smooth transitions and micro-interactions where appropriate
+3. Do NOT break existing functionality
+4. Verify all existing tests still pass
+
+Prioritise usability and accessibility. Follow React and Tailwind best practices.
+"""
+            await self.call_claude_code(
+                prompt=prompt,
+                project_path=str(project_path),
+                allowed_tools=["Write", "Edit", "Bash", "Read"],
+            )
+
+            await self._validate_implementation(project_path, issue_number)
+            await self._commit_and_push(project_path, branch_name, issue_number)
+            pr = await self._create_pull_request(
+                repo_name=repo_name,
+                branch_name=branch_name,
+                issue_number=issue_number,
+                issue_title=f"improve(ui): {issue.get('title', '')}",
+            )
+
+            await self.log_action("improve_ui", "completed", {
+                "repo": repo_name, "issue": issue_number, "pr_number": pr.get("number")
+            })
+
+            return {
+                "success": True,
+                "issue_number": issue_number,
+                "branch": branch_name,
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("html_url"),
+                "message": "UI improvement complete and PR created",
+            }
+
+        except Exception as e:
+            await self.log_action("improve_ui", "failed", {"error": str(e)})
+            raise
