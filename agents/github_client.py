@@ -860,6 +860,52 @@ class GitHubClient:
 
         return response.json().get("workflow_runs", [])
 
+    async def get_workflow_run_logs(self, repo_name: str, run_id: int) -> str:
+        """
+        Download and extract logs for a specific workflow run.
+
+        Args:
+            repo_name: Repository name
+            run_id: Workflow run ID
+
+        Returns:
+            Combined log text (capped at 10 KB) or empty string on error
+        """
+        import io
+        import zipfile
+
+        owner = self.org or self.username
+        url = f"{self.base_url}/repos/{owner}/{repo_name}/actions/runs/{run_id}/logs"
+
+        try:
+            response = requests.get(
+                url, headers=self.headers, allow_redirects=True, timeout=30
+            )
+            if response.status_code == 404:
+                return ""
+            response.raise_for_status()
+
+            # GitHub returns a ZIP archive of log files
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                log_parts = []
+
+                # Prefer logs from test/build/error steps
+                targeted = [
+                    name for name in zf.namelist()
+                    if any(kw in name.lower() for kw in ["test", "build", "error", "fail"])
+                ]
+                names_to_read = targeted if targeted else zf.namelist()[:5]
+
+                for name in names_to_read:
+                    with zf.open(name) as f:
+                        log_parts.append(f.read().decode("utf-8", errors="replace"))
+
+                combined = "\n".join(log_parts)
+                return combined[:10_000]  # Cap at 10 KB
+
+        except Exception as e:
+            return f"[Log fetch error: {e}]"
+
     async def assign_issue(
         self,
         repo_name: str,

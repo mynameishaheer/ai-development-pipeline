@@ -59,6 +59,9 @@ class AgentWorkerDaemon:
             agent_type: "idle" for agent_type in self.agent_types
         }
 
+        # ISO-format start time for the current task per worker (used for stall detection)
+        self._task_start_times: Dict[str, str] = {}
+
         self.logger.info(
             "AgentWorkerDaemon initialized",
             extra={"agent_types": self.agent_types}
@@ -100,6 +103,7 @@ class AgentWorkerDaemon:
                     continue
 
                 self._worker_states[agent_type] = "working"
+                self._task_start_times[agent_type] = datetime.utcnow().isoformat()
                 self.logger.info(
                     f"[{agent_type}] Claimed task: {task.get('task_type')} "
                     f"for issue #{task.get('issue_number')} in {task.get('repo_name')}"
@@ -149,6 +153,7 @@ class AgentWorkerDaemon:
                     await self._sync_github_on_failure(task, error_msg, agent_type)
 
                 self._worker_states[agent_type] = "idle"
+                self._task_start_times.pop(agent_type, None)
 
             except Exception as loop_error:
                 # Loop-level error (e.g., Redis connection issue) — back off
@@ -184,6 +189,7 @@ class AgentWorkerDaemon:
                     continue
 
                 self._worker_states[AgentType.QA] = "working"
+                self._task_start_times[AgentType.QA] = datetime.utcnow().isoformat()
                 self.logger.info(
                     f"[qa] Claimed QA task: {task.get('task_type')} "
                     f"PR #{task.get('pr_number')} in {task.get('repo_name')}"
@@ -264,6 +270,7 @@ class AgentWorkerDaemon:
                     await self._sync_github_on_failure(task, error_msg, AgentType.QA)
 
                 self._worker_states[AgentType.QA] = "idle"
+                self._task_start_times.pop(AgentType.QA, None)
 
             except Exception as loop_error:
                 self.logger.error(
@@ -403,12 +410,13 @@ class AgentWorkerDaemon:
     # ==========================================
 
     def get_status(self) -> Dict:
-        """Return queue sizes and current worker states."""
+        """Return queue sizes, worker states, and per-worker task start times."""
         queue_status = self.assignment_manager.get_queue_status()
         return {
             "running": self._running,
             "agent_types": self.agent_types,
             "worker_states": dict(self._worker_states),
+            "task_start_times": dict(self._task_start_times),
             "queues": {
                 agent_type: info.get("pending_tasks", 0)
                 for agent_type, info in queue_status.items()

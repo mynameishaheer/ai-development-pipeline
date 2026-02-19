@@ -24,6 +24,7 @@ from agents.devops_agent import DevOpsAgent
 from agents.qa_agent import QAAgent
 from agents.assignment_manager import AssignmentManager
 from agents.worker_daemon import AgentWorkerDaemon
+from agents.github_client import create_github_client
 
 
 class MasterAgent:
@@ -80,6 +81,13 @@ class MasterAgent:
         # Worker daemon (started on demand)
         self._worker_daemon: Optional[AgentWorkerDaemon] = None
         self._worker_task: Optional[asyncio.Task] = None
+
+        # Phase 4: proactive Discord notifications + CI monitor
+        self._notify_channel = None  # set by discord_bot on every command
+        self._monitor = None         # PipelineMonitor instance
+
+        # Auto-restore the most recently active project from disk
+        self._restore_last_project()
 
         print("🧠 Master Agent initialized (Phase 3)")
 
@@ -164,6 +172,7 @@ class MasterAgent:
             "assign_issues": self.handle_assign_issues,
             "run_tests": self.handle_run_tests,
             "workers": self.handle_workers,
+            "monitor": lambda msg, uid: self.handle_monitor_status(msg),
             "general_query": self.handle_general_query,
         }
 
@@ -334,6 +343,40 @@ Your project is ready for development! 🚀
         self.current_project["status"] = "pipeline_complete"
         await self.save_project_metadata()
 
+        # --- Phase 4: Auto-push generated code to GitHub ---
+        push_status = ""
+        github_token = os.getenv("GITHUB_TOKEN", "")
+        github_username = os.getenv("GITHUB_USERNAME", "")
+        if github_token and github_username and repo_name:
+            try:
+                from agents.github_pusher import push_project_to_github
+                pushed = await push_project_to_github(
+                    project_path=project_path,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    github_username=github_username,
+                )
+                if pushed:
+                    repo_url = self.current_project.get("repo_url", "")
+                    push_status = f"\n🚀 Code pushed to {repo_url or repo_name}"
+                else:
+                    push_status = "\n⚠️ Auto-push failed — check logs and push manually."
+            except Exception as e:
+                push_status = f"\n⚠️ Auto-push error: {str(e)[:100]}"
+        else:
+            push_status = "\n⚠️ GITHUB_TOKEN/GITHUB_USERNAME not set — skipping auto-push."
+
+        # --- Phase 4: Start pipeline monitor ---
+        monitor_status = ""
+        try:
+            from agents.pipeline_monitor import PipelineMonitor
+            github_client = create_github_client()
+            self._monitor = PipelineMonitor(master=self, github=github_client)
+            await self._monitor.start()
+            monitor_status = "\n🔍 CI/CD monitor started — watching for failures."
+        except Exception as e:
+            monitor_status = f"\n⚠️ Could not start monitor: {str(e)[:100]}"
+
         # Format summary
         steps_summary = ""
         for step in result.get("steps", []):
@@ -346,6 +389,7 @@ Your project is ready for development! 🚀
 {steps_summary}
 **Project**: `{self.current_project['name']}`
 **Repository**: {self.current_project.get('repo_url', 'N/A')}
+{push_status}{monitor_status}
 
 The pipeline has automatically:
 - Designed database schema and migrations
@@ -701,6 +745,63 @@ Provide a concise 3-5 line summary.
         else:
             return await self.worker_status()
 
+    def set_notify_channel(self, channel):
+        """Store the Discord channel for proactive notifications."""
+        self._notify_channel = channel
+
+    async def handle_monitor_status(self, action: str = "status") -> str:
+        """Handle !monitor [start|stop|status] commands."""
+        action = action.lower().strip()
+        if action == "stop":
+            return await self._stop_monitor()
+        elif action == "start":
+            return await self._start_monitor()
+        else:
+            return self._monitor_status_message()
+
+    async def _start_monitor(self) -> str:
+        """Start the PipelineMonitor if not already running."""
+        if self._monitor and self._monitor.is_running():
+            return "⚠️ Pipeline monitor is already running."
+
+        if not self.current_project:
+            return "❌ No active project to monitor."
+
+        from agents.pipeline_monitor import PipelineMonitor
+        try:
+            github = create_github_client()
+        except ValueError as e:
+            return f"❌ Cannot start monitor: {e}"
+
+        self._monitor = PipelineMonitor(master=self, github=github)
+        await self._monitor.start()
+        repo = self.current_project.get("repo_name", "unknown")
+        return f"✅ Pipeline monitor started for `{repo}`."
+
+    async def _stop_monitor(self) -> str:
+        """Stop the PipelineMonitor."""
+        if not self._monitor or not self._monitor.is_running():
+            return "⚠️ Pipeline monitor is not running."
+        await self._monitor.stop()
+        return "✅ Pipeline monitor stopped."
+
+    def _monitor_status_message(self) -> str:
+        """Return a status string for the monitor."""
+        if not self._monitor:
+            return "📊 Pipeline monitor: **not started**"
+        status = self._monitor.get_status()
+        running = "✅ Running" if status["running"] else "⏹ Stopped"
+        repo = status.get("repo", "N/A")
+        fixes = sum(status.get("fix_attempts", {}).values())
+        handled = status.get("handled_runs", 0)
+        return (
+            f"📊 **Pipeline Monitor Status**\n\n"
+            f"**State**: {running}\n"
+            f"**Watching**: `{repo}`\n"
+            f"**Runs handled**: {handled}\n"
+            f"**Total fix attempts**: {fixes}"
+        )
+
     async def start_workers(self, agents: Optional[List[str]] = None) -> str:
         """Create and start the AgentWorkerDaemon as a background asyncio task."""
         if self._worker_daemon and self._worker_daemon._running:
@@ -905,6 +1006,21 @@ Provide a helpful, friendly response. If you need more information, ask.
         elif has_node:
             return "node"
         return "unknown"
+
+    def _restore_last_project(self):
+        """On startup, reload the most recently modified project from disk."""
+        try:
+            metadata_files = sorted(
+                self.workspace_dir.glob("*/.project_metadata.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if metadata_files:
+                with open(metadata_files[0], "r") as f:
+                    self.current_project = json.load(f)
+                print(f"✅ Restored project: {self.current_project.get('name')}")
+        except Exception as e:
+            print(f"⚠️ Could not restore project state: {e}")
 
     async def save_project_metadata(self):
         """Save current project metadata to disk."""

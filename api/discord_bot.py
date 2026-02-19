@@ -87,7 +87,7 @@ async def new_project(ctx, *, description: str):
     Usage: !new <project description>
     Example: !new Create a task management app with React and FastAPI
     """
-    
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         response = await master.handle_new_project(description, str(ctx.author.id))
         await ctx.send(response)
@@ -99,7 +99,7 @@ async def project_status(ctx):
     Check current project status
     Usage: !status
     """
-    
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         response = await master.handle_status_check()
         await ctx.send(response)
@@ -112,7 +112,7 @@ async def code_task(ctx, *, task_description: str):
     Usage: !task <task description>
     Example: !task Add user authentication with JWT
     """
-    
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         response = await master.handle_code_task(task_description, str(ctx.author.id))
         await ctx.send(response)
@@ -124,7 +124,7 @@ async def deploy_project(ctx):
     Prepare project for deployment
     Usage: !deploy
     """
-    
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         response = await master.handle_deploy("Deploy the project", str(ctx.author.id))
         await ctx.send(response)
@@ -136,6 +136,7 @@ async def run_pipeline(ctx, *, action: str = "pipeline"):
     Run the full automated pipeline
     Usage: !run pipeline
     """
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         response = await master.handle_run_full_pipeline(action, str(ctx.author.id))
         if len(response) > 2000:
@@ -153,6 +154,7 @@ async def workers_command(ctx, action: str = "status"):
     Usage: !workers [start|stop|status]
     Example: !workers start
     """
+    master.set_notify_channel(ctx.channel)
     async with ctx.typing():
         action = action.lower()
         if action == "start":
@@ -161,6 +163,25 @@ async def workers_command(ctx, action: str = "status"):
             response = await master.stop_workers()
         else:
             response = await master.worker_status()
+
+        if len(response) > 2000:
+            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
+            for chunk in chunks:
+                await ctx.send(chunk)
+        else:
+            await ctx.send(response)
+
+
+@bot.command(name='monitor')
+async def monitor_command(ctx, action: str = "status"):
+    """
+    Manage the CI/CD pipeline monitor
+    Usage: !monitor [start|stop|status]
+    Example: !monitor status
+    """
+    master.set_notify_channel(ctx.channel)
+    async with ctx.typing():
+        response = await master.handle_monitor_status(action)
 
         if len(response) > 2000:
             chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
@@ -210,6 +231,16 @@ async def help_command(ctx):
             "`!workers start` - Start background worker agents\n"
             "`!workers stop` - Stop worker agents\n"
             "`!workers status` - Check queue sizes and worker states"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔍 Pipeline Monitor",
+        value=(
+            "`!monitor start` - Start CI/CD monitoring (auto-started after pipeline)\n"
+            "`!monitor stop` - Stop the monitor\n"
+            "`!monitor status` - Show monitor state and fix attempt history"
         ),
         inline=False
     )
