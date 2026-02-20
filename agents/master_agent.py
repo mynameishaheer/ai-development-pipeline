@@ -266,7 +266,11 @@ Return format:
             prd_path = prd_result["prd_path"]
             prd_size = Path(prd_path).stat().st_size / 1024
         except Exception as e:
-            return f"❌ PRD creation failed: {str(e)}"
+            diagnosis = self._format_error_for_discord(
+                e, {"stage": "PRD creation", "project": project_name}
+            )
+            await self._notify(diagnosis)
+            return f"❌ PRD creation failed: {str(e)[:200]}\n\nDiagnosis sent to Discord."
 
         # Step 2: GitHub setup
         try:
@@ -872,6 +876,41 @@ Provide a concise 3-5 line summary.
                 await self._notify_channel.send(msg)
             except Exception:
                 pass
+
+    def _format_error_for_discord(self, error: Exception, context: dict) -> str:
+        """
+        Format a rich Discord error message with classification and suggested fix.
+
+        Args:
+            error: The exception that occurred
+            context: Dict with keys like 'stage' and 'project'
+
+        Returns:
+            Formatted Discord message string
+        """
+        from utils.error_handlers import classify_claude_error
+        error_str = str(error)
+        error_type = classify_claude_error(error_str)
+
+        stage = context.get("stage", "unknown")
+        project = context.get("project", "unknown")
+
+        suggestions = {
+            "rate_limit": "Wait a few minutes and try again.",
+            "auth_error": "Check your `ANTHROPIC_API_KEY` environment variable.",
+            "import_error": "Run `pip install -r requirements.txt` in the project directory.",
+            "file_not_found": "Check that the project directory exists and is accessible.",
+            "permission": "Check file/directory permissions.",
+            "generic": "Check the logs for more details.",
+        }
+        suggestion = suggestions.get(error_type, "Check the logs for more details.")
+
+        return (
+            f"❌ **Pipeline failure** — `{stage}` for `{project}`\n\n"
+            f"**Error type**: `{error_type}`\n"
+            f"**Error**: {error_str[:300]}\n\n"
+            f"**Suggested fix**: {suggestion}"
+        )
 
     async def handle_monitor_status(self, action: str = "status") -> str:
         action = action.lower().strip()

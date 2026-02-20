@@ -157,8 +157,11 @@ class AgentWorkerDaemon:
                         error=error_msg,
                     )
 
-                    # GitHub sync on failure
-                    await self._sync_github_on_failure(task, error_msg, agent_type)
+                    # Get diagnosis then sync GitHub with enriched comment
+                    diagnosis = await self._get_task_failure_diagnosis(task, error_msg)
+                    await self._sync_github_on_failure(
+                        task, error_msg, agent_type, diagnosis=diagnosis
+                    )
 
                 self._worker_states[agent_type] = "idle"
                 self._task_start_times.pop(agent_type, None)
@@ -276,7 +279,10 @@ class AgentWorkerDaemon:
                         issue_number=task.get("issue_number", 0),
                         error=error_msg,
                     )
-                    await self._sync_github_on_failure(task, error_msg, AgentType.QA)
+                    diagnosis = await self._get_task_failure_diagnosis(task, error_msg)
+                    await self._sync_github_on_failure(
+                        task, error_msg, AgentType.QA, diagnosis=diagnosis
+                    )
 
                 self._worker_states[AgentType.QA] = "idle"
                 self._task_start_times.pop(AgentType.QA, None)
@@ -367,18 +373,51 @@ class AgentWorkerDaemon:
                 f"GitHub sync on complete failed for issue #{issue_number}: {e}"
             )
 
+    async def _get_task_failure_diagnosis(self, task: Dict, error: str) -> str:
+        """
+        Call Claude Code to generate a human-readable diagnosis of why a task failed.
+        Returns a 2-3 sentence summary, or a fallback string on failure.
+        """
+        agent_type = task.get("agent_type", "backend")
+        try:
+            agent = self._get_agent(agent_type)
+            result = await agent.call_claude_code(
+                prompt=(
+                    f"A development task failed with this error:\n\n"
+                    f"Task type: {task.get('task_type')}\n"
+                    f"Repository: {task.get('repo_name')}\n"
+                    f"Issue: #{task.get('issue_number')}\n"
+                    f"Error: {error}\n\n"
+                    f"In 2-3 sentences, diagnose: what went wrong and what a "
+                    f"developer should do to fix it."
+                ),
+                allowed_tools=["Read"],
+                timeout=60,
+            )
+            diagnosis = result.get("stdout", "").strip()
+            return diagnosis or "Unable to generate diagnosis."
+        except Exception as exc:
+            self.logger.warning(f"Diagnosis call failed: {exc}")
+            return "Diagnosis failed — see logs for details."
+
     async def _sync_github_on_failure(
-        self, task: Dict, error: str, agent_type: str
+        self, task: Dict, error: str, agent_type: str, diagnosis: str = None
     ):
-        """Add failure comment + needs-attention label to the GitHub issue."""
+        """Add enriched failure comment + needs-attention label to the GitHub issue."""
         repo_name = task.get("repo_name", "")
         issue_number = task.get("issue_number", 0)
 
         if not repo_name or not issue_number:
             return
 
+        diagnosis_section = (
+            f"\n\n**Diagnosis:** {diagnosis}" if diagnosis else ""
+        )
         comment = (
-            f"❌ **{agent_type}** agent failed: {error[:500]}\n\n"
+            f"❌ **{agent_type}** agent failed after 3 attempts."
+            f"{diagnosis_section}\n\n"
+            f"**Error:** {error[:500]}\n\n"
+            f"Task moved to `needs-attention` label.\n\n"
             f"*{datetime.now().strftime('%Y-%m-%d %H:%M UTC')}*"
         )
 

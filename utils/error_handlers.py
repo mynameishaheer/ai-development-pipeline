@@ -338,6 +338,26 @@ class ErrorRecoveryManager:
 error_recovery_manager = ErrorRecoveryManager()
 
 
+def classify_claude_error(error_output: str) -> str:
+    """
+    Classify a Claude Code error output into a category.
+    Returns: 'rate_limit' | 'auth_error' | 'import_error' |
+             'file_not_found' | 'permission' | 'generic'
+    """
+    text = error_output.lower()
+    if any(x in text for x in ["rate limit", "429", "too many requests"]):
+        return "rate_limit"
+    if any(x in text for x in ["authentication", "401", "invalid api key", "not authenticated"]):
+        return "auth_error"
+    if any(x in text for x in ["modulenotfounderror", "importerror", "no module named"]):
+        return "import_error"
+    if any(x in text for x in ["filenotfounderror", "no such file", "cannot find"]):
+        return "file_not_found"
+    if any(x in text for x in ["permission denied", "403", "access denied"]):
+        return "permission"
+    return "generic"
+
+
 # Utility function for quick error handling
 async def handle_error(error: Exception, context: dict = None) -> Optional[Any]:
     """
