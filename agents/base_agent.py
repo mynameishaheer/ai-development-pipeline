@@ -4,6 +4,7 @@ Abstract base class that all sub-agents inherit from
 Provides common functionality for Claude Code execution, messaging, logging, and error handling
 """
 
+import os
 import subprocess
 import asyncio
 from abc import ABC, abstractmethod
@@ -146,7 +147,12 @@ class BaseAgent(ABC):
         
         # Build command
         cmd = ["claude", "-p", prompt]
-        
+
+        # Route to local Ollama model if configured
+        ollama_model = os.environ.get("OLLAMA_MODEL")
+        if ollama_model:
+            cmd.extend(["--model", ollama_model])
+
         # Add allowed tools
         if allowed_tools:
             cmd.extend(["--allowedTools"] + allowed_tools)
