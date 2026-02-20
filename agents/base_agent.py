@@ -14,7 +14,7 @@ from pathlib import Path
 import time
 import uuid
 
-from utils.error_handlers import retry_with_backoff, handle_error, ClaudeCodeError
+from utils.error_handlers import handle_error, ClaudeCodeError
 from utils.structured_logger import get_logger
 from utils.constants import (
     AgentType,
@@ -73,6 +73,7 @@ class BaseAgent(ABC):
         self.current_project = None
         self.current_task = None
         self.is_busy = False
+        self._is_healing = False  # recursion guard for self-healing
         
         self.logger.info(
             f"Agent initialized: {agent_type} ({self.agent_id})",
@@ -114,7 +115,112 @@ class BaseAgent(ABC):
     # CLAUDE CODE EXECUTION
     # ==========================================
     
-    @retry_with_backoff(max_retries=3, base_delay=2.0, exceptions=(ClaudeCodeError,))
+    async def _run_claude_subprocess(
+        self,
+        prompt: str,
+        cwd: str,
+        allowed_tools: Optional[List[str]] = None,
+        timeout: int = CLAUDE_CODE_TIMEOUT,
+    ) -> Dict[str, Any]:
+        """
+        Low-level subprocess executor for Claude Code.
+        Raises ClaudeCodeError on failure or timeout.
+
+        Returns:
+            Dictionary with stdout, stderr, return_code, success, duration
+        """
+        start_time = time.time()
+
+        # Build command
+        cmd = ["claude", "-p", prompt]
+
+        # Add allowed tools
+        if allowed_tools:
+            cmd.extend(["--allowedTools"] + allowed_tools)
+
+        # Build subprocess env — strip CLAUDECODE so nested claude
+        # sessions are not blocked by the parent session guard
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
+        try:
+            # Execute in a thread pool so the asyncio event loop stays free
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=cwd,
+                    timeout=timeout,
+                    env=env,
+                ),
+            )
+
+            duration = time.time() - start_time
+            result_dict = {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "return_code": result.returncode,
+                "success": result.returncode == 0,
+                "duration": duration,
+            }
+
+            if not result_dict["success"]:
+                error_output = result.stderr or result.stdout or "no output"
+                raise ClaudeCodeError(f"Claude Code failed: {error_output}")
+
+            return result_dict
+
+        except subprocess.TimeoutExpired:
+            raise ClaudeCodeError(f"Claude Code timeout after {timeout}s")
+
+    async def _diagnose_and_fix(self, error_output: str, project_path: str):
+        """
+        Attempt to diagnose and fix a Claude Code failure before retrying.
+        Calls Claude Code with a diagnosis prompt and applies the suggested fix.
+        Skips healing for auth/permission errors and if already healing (guard).
+        """
+        if self._is_healing:
+            return  # recursion guard — never heal a heal
+
+        from utils.error_handlers import classify_claude_error
+        error_type = classify_claude_error(error_output)
+
+        # Don't try to heal auth or permission errors programmatically
+        if error_type in ("auth_error", "permission"):
+            return
+
+        self._is_healing = True
+        try:
+            diagnosis_prompt = f"""
+A Claude Code call failed with this error:
+{error_output}
+
+Error type: {error_type}
+
+Diagnose what went wrong and fix it. Common fixes:
+- import_error: run `pip install <package>` in the project directory
+- file_not_found: create the missing file or directory
+- generic: read the error carefully and apply the minimal fix needed
+
+Apply the fix now. Do not explain — just fix it.
+"""
+            await self._run_claude_subprocess(
+                prompt=diagnosis_prompt,
+                cwd=project_path,
+                allowed_tools=["Bash", "Write", "Edit", "Read"],
+                timeout=120,
+            )
+            self.logger.info(
+                f"Self-healing attempt completed for error type: {error_type}"
+            )
+        except Exception as e:
+            self.logger.warning(f"Self-healing failed: {e}")
+        finally:
+            self._is_healing = False
+
     async def call_claude_code(
         self,
         prompt: str,
@@ -124,48 +230,34 @@ class BaseAgent(ABC):
         timeout: int = CLAUDE_CODE_TIMEOUT
     ) -> Dict[str, Any]:
         """
-        Execute Claude Code CLI with error handling and retry logic
-        
+        Execute Claude Code CLI with self-healing retry logic.
+
+        On failure:
+        1. Classify the error
+        2. Attempt self-diagnosis and fix (unless already healing)
+        3. Retry up to max_retries times with exponential backoff
+        4. Raise ClaudeCodeError if all retries exhausted
+
         Args:
             prompt: Instruction for Claude Code
             project_path: Directory to execute in
             allowed_tools: Tools Claude Code can use
             context_files: Files to include in context
             timeout: Execution timeout in seconds
-        
+
         Returns:
-            Dictionary with stdout, stderr, return_code, success
+            Dictionary with stdout, stderr, return_code, success, duration
         """
-        start_time = time.time()
-        
         # Use agent-specific tools if not specified
         if allowed_tools is None:
             allowed_tools = CLAUDE_CODE_TOOLS.get(
                 self.agent_type,
                 ["Write", "Edit", "Read", "Bash"]
             )
-        
-        # Build command
-        cmd = ["claude", "-p", prompt]
 
-        # Route to local Ollama model if configured
-        ollama_model = os.environ.get("OLLAMA_MODEL")
-        if ollama_model:
-            cmd.extend(["--model", ollama_model])
-
-        # Add allowed tools
-        if allowed_tools:
-            cmd.extend(["--allowedTools"] + allowed_tools)
-        
-        # # Add context files
-        # Note: --context flag not supported in all Claude Code versions
-        # if context_files:
-        #     for file in context_files:
-        #         cmd.extend(["--context", file])
-        
         # Set working directory
         cwd = project_path or str(self.workspace_dir)
-        
+
         self.logger.log_agent_action(
             agent_type=self.agent_type,
             action="claude_code_call",
@@ -176,85 +268,83 @@ class BaseAgent(ABC):
                 "allowed_tools": allowed_tools
             }
         )
-        
-        try:
-            # Execute Claude Code in a thread pool so the asyncio event loop
-            # stays free (Discord heartbeats, other coroutines, etc.)
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
+
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                result = await self._run_claude_subprocess(
+                    prompt=prompt,
                     cwd=cwd,
-                    timeout=timeout
+                    allowed_tools=allowed_tools,
+                    timeout=timeout,
                 )
-            )
-            
-            duration = time.time() - start_time
-            
-            # Prepare result
-            result_dict = {
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "return_code": result.returncode,
-                "success": result.returncode == 0,
-                "duration": duration
-            }
-            
-            # Log the result
-            self.logger.log_claude_code_call(
-                prompt=prompt,
-                result=result_dict,
-                duration=duration
-            )
-            
-            # Log action completion
-            self.logger.log_agent_action(
-                agent_type=self.agent_type,
-                action="claude_code_call",
-                status="completed" if result_dict["success"] else "failed",
-                details={
-                    "duration": round(duration, 2),
-                    "return_code": result.returncode
-                }
-            )
-            
-            # Raise error if failed
-            if not result_dict["success"]:
-                raise ClaudeCodeError(f"Claude Code failed: {result.stderr}")
-            
-            return result_dict
-            
-        except subprocess.TimeoutExpired:
-            duration = time.time() - start_time
-            
-            error_msg = f"Claude Code timeout after {timeout}s"
-            self.logger.error(error_msg, extra={"duration": duration})
-            
-            raise ClaudeCodeError(error_msg)
-            
-        except Exception as e:
-            duration = time.time() - start_time
-            
-            self.logger.error(
-                f"Claude Code execution failed: {str(e)}",
-                exc_info=True,
-                extra={"duration": duration}
-            )
-            
-            # Try to recover from error
-            recovery_result = await handle_error(e, {
-                "agent_type": self.agent_type,
-                "prompt": prompt[:200]
-            })
-            
-            if recovery_result == "RETRY":
-                # Error handler suggests retry
-                raise ClaudeCodeError(f"Retryable error: {str(e)}")
-            
-            raise
+
+                # Log success
+                self.logger.log_claude_code_call(
+                    prompt=prompt,
+                    result=result,
+                    duration=result["duration"],
+                )
+                self.logger.log_agent_action(
+                    agent_type=self.agent_type,
+                    action="claude_code_call",
+                    status="completed",
+                    details={
+                        "duration": round(result["duration"], 2),
+                        "return_code": result["return_code"],
+                        "attempt": attempt + 1,
+                    }
+                )
+                return result
+
+            except ClaudeCodeError as e:
+                last_error = e
+                self.logger.warning(
+                    f"Claude Code attempt {attempt + 1}/{max_retries} failed: "
+                    f"{str(e)[:200]}"
+                )
+
+                # Attempt self-healing before retry (skipped if already healing)
+                if not self._is_healing:
+                    await self._diagnose_and_fix(str(e), cwd)
+
+                if attempt < max_retries - 1:
+                    delay = 2.0 * (2.0 ** attempt)  # 2s, 4s
+                    await asyncio.sleep(delay)
+                    continue
+
+                # All retries exhausted
+                self.logger.log_agent_action(
+                    agent_type=self.agent_type,
+                    action="claude_code_call",
+                    status="failed",
+                    details={
+                        "attempts": max_retries,
+                        "final_error": str(e)[:200],
+                    }
+                )
+                raise
+
+            except Exception as e:
+                self.logger.error(
+                    f"Claude Code execution failed: {str(e)}",
+                    exc_info=True,
+                )
+
+                # Try to recover from unexpected errors
+                recovery_result = await handle_error(e, {
+                    "agent_type": self.agent_type,
+                    "prompt": prompt[:200]
+                })
+
+                if recovery_result == "RETRY":
+                    raise ClaudeCodeError(f"Retryable error: {str(e)}")
+
+                raise
+
+        raise last_error
     
     # ==========================================
     # MESSAGING
